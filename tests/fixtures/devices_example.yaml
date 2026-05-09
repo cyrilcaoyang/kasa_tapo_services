@@ -1,0 +1,34 @@
+devices:
+  - id: cam_lab499_west
+    name: Lab 499 West Camera
+    kind: camera
+    host: 192.168.1.42
+    onvif_port: 2020
+    lenses:
+      - { id: wide, label: Wide, rtsp_path: stream1 }
+      - { id: tele, label: Tele, rtsp_path: stream2 }
+
+  - id: cam_storage
+    name: Storage Camera
+    kind: camera
+    host: 192.168.1.43
+    onvif_port: 2020
+    lenses:
+      - { id: main, label: Main, rtsp_path: stream1 }
+
+  - id: plug_hotplate_strip
+    name: Hotplate Strip
+    kind: power_strip
+    host: 192.168.1.51
+    outlets:
+      - { index: 0, label: Hotplate A }
+      - { index: 1, label: Hotplate B }
+      - { index: 2, label: Stirrer }
+      - { index: 3, label: "(spare)" }
+      - { index: 4, label: "(spare)" }
+      - { index: 5, label: "(spare)" }
+
+  - id: plug_balance_lamp
+    name: Balance Lamp
+    kind: smart_plug
+    host: 192.168.1.52

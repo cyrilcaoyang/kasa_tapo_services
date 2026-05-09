@@ -1,0 +1,50 @@
+[Unit]
+Description=AC Organic Lab - Kasa + Tapo gateway service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ac-lab
+Group=ac-lab
+WorkingDirectory=/opt/kasa-tapo-services
+EnvironmentFile=/etc/kasa-tapo-services/.env
+# Snapshots and recordings land here when devices.yaml omits a per-camera
+# `media:` block. Pre-create the directory on first install:
+#   sudo install -d -o ac-lab -g ac-lab -m 0755 /var/lib/kasa-tapo-media
+# If you point any camera's media.snapshots_dir / media.recordings_dir at
+# a path outside /var/lib/kasa-tapo-media, append it to ReadWritePaths
+# below or drop ProtectHome=true (when the path lives under /home).
+Environment=KASA_TAPO_MEDIA_ROOT=/var/lib/kasa-tapo-media
+ExecStart=/opt/kasa-tapo-services/.venv/bin/uvicorn \
+    kasa_tapo_services.main:app \
+    --host 127.0.0.1 \
+    --port 8002 \
+    --no-access-log
+Restart=on-failure
+RestartSec=2
+
+# Standard hardening - same set as ac-dashboard-api.service in the
+# dashboard repo.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LimitNOFILE=65536
+
+# The media-capture routes write JPEG snapshots and MP4 recordings via
+# an `ffmpeg` subprocess. ProtectSystem=strict makes the rest of the FS
+# read-only, so we have to whitelist the media root explicitly.
+ReadWritePaths=/var/lib/kasa-tapo-media
+
+# Logs go to the journal under the unit name.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

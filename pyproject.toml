@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kasa-tapo-services"
+version = "0.1.0"
+description = "STATUS_SPEC v1.0 gateway service for TP-Link Kasa smart plugs (HS103, HS300) and Tapo cameras (C200/C210/C220/C225/C245D). Bridges the lab LAN devices to the AC Organic Self-driving Lab dashboard."
+requires-python = ">=3.10"
+readme = "README.md"
+authors = [{ name = "AC Organic Lab" }]
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    # TP-Link Kasa async SDK (HS103 single plug, HS300 multi-outlet strip).
+    "python-kasa>=0.7",
+    # Tapo camera client - used for privacy mode, day/night override, model
+    # info. Synchronous; we wrap calls in asyncio.to_thread().
+    "pytapo>=3.4.13",
+    # ONVIF Profile S/T client - used for PTZ, presets, zoom. The async
+    # variant uses zeep-asyncio. Falls back to thread executor if a method is
+    # not exposed in async form yet.
+    "onvif-zeep-async>=3.1.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+    "ruff>=0.5",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+# CLI: render /etc/go2rtc/go2rtc.yaml from devices.yaml + .env. Run as a
+# systemd ExecStartPre on the dashboard host before go2rtc starts.
+kasa-tapo-bootstrap-go2rtc = "kasa_tapo_services.tapo.bootstrap_go2rtc:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]
+# B008: FastAPI's `Depends()` and `Path()` defaults are the framework's idiom.
+# UP007: keep `X | None = None` consistent with Pydantic schema gen on 3.10.
+ignore = ["E501", "B008"]

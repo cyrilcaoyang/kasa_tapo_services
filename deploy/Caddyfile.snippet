@@ -1,0 +1,25 @@
+# Drop the two `handle*` blocks below into your dashboard's Caddyfile
+# block (above or below the existing `reverse_proxy 127.0.0.1:3000`
+# directive). They route browser traffic to the gateway and to go2rtc.
+#
+# Browser -> Caddy (TLS) -> 127.0.0.1:1984 (go2rtc)         WS upgrade
+# Browser -> Caddy (TLS) -> 127.0.0.1:8002 (kasa-tapo-services)
+#
+# All other dashboard requests still go to Next.js on :3000, which
+# proxies /api/* to FastAPI on :8001.
+
+# go2rtc - WebSocket upgrade for the MSE feed.
+handle_path /streams/* {
+    reverse_proxy 127.0.0.1:1984
+}
+
+# Direct gateway access for development. In production the dashboard's
+# aggregator forwards /api/equipment/{id}/control/* to the gateway
+# server-side (see ac-organic-lab/api/app/control.py); this block is a
+# pure debugging escape hatch and can be removed for a hardened deploy.
+handle /api/cameras/* {
+    reverse_proxy 127.0.0.1:8002
+}
+handle /api/plugs/* {
+    reverse_proxy 127.0.0.1:8002
+}

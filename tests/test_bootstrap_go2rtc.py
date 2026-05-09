@@ -1,0 +1,62 @@
+"""Tests for the go2rtc config renderer."""
+
+from __future__ import annotations
+
+from kasa_tapo_services.config import GatewayConfig
+from kasa_tapo_services.tapo.bootstrap_go2rtc import render_go2rtc_yaml
+
+
+def test_renders_one_stream_per_lens(example_config: GatewayConfig) -> None:
+    payload = render_go2rtc_yaml(example_config)
+    streams = payload["streams"]
+    # cam_lab499_west has 2 lenses, cam_storage has 1, so 3 total.
+    assert set(streams.keys()) == {
+        "cam_lab499_west_wide",
+        "cam_lab499_west_tele",
+        "cam_storage_main",
+    }
+    # Listen address is the configured default.
+    assert payload["api"]["listen"] == "127.0.0.1:1984"
+    # The default origin allow-list is `*` so the browser (running on a
+    # different port from go2rtc) can complete the WS upgrade.
+    assert payload["api"]["origin"] == "*"
+
+
+def test_render_go2rtc_yaml_origin_override(example_config: GatewayConfig) -> None:
+    payload = render_go2rtc_yaml(example_config, origin="https://lab.example.com")
+    assert payload["api"]["origin"] == "https://lab.example.com"
+
+
+def test_uses_env_var_placeholders_not_plaintext(example_config: GatewayConfig) -> None:
+    payload = render_go2rtc_yaml(example_config)
+    url = payload["streams"]["cam_lab499_west_wide"][0]
+    assert "${CAM_LAB499_WEST_USER}" in url
+    assert "${CAM_LAB499_WEST_PASS}" in url
+    assert "192.168.1.42:554/stream1" in url
+
+
+def test_disabled_devices_are_skipped() -> None:
+    cfg = GatewayConfig.model_validate(
+        {
+            "devices": [
+                {
+                    "id": "cam_active",
+                    "name": "Active",
+                    "kind": "camera",
+                    "host": "192.168.1.10",
+                    "lenses": [{"id": "main", "label": "Main", "rtsp_path": "stream1"}],
+                },
+                {
+                    "id": "cam_off",
+                    "name": "Off",
+                    "kind": "camera",
+                    "host": "192.168.1.11",
+                    "enabled": False,
+                    "lenses": [{"id": "main", "label": "Main", "rtsp_path": "stream1"}],
+                },
+            ]
+        }
+    )
+    payload = render_go2rtc_yaml(cfg)
+    assert "cam_active_main" in payload["streams"]
+    assert "cam_off_main" not in payload["streams"]

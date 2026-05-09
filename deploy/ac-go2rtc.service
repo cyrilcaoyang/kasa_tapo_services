@@ -1,0 +1,32 @@
+[Unit]
+Description=AC Organic Lab - go2rtc RTSP/MSE bridge for Tapo cameras
+After=network-online.target kasa-tapo-services.service
+Wants=network-online.target
+# kasa-tapo-bootstrap-go2rtc renders /etc/go2rtc/go2rtc.yaml from
+# /opt/kasa-tapo-services/devices.yaml at every boot, so go2rtc always
+# starts with a config consistent with the gateway's view of devices.
+
+[Service]
+Type=simple
+User=ac-lab
+Group=ac-lab
+WorkingDirectory=/opt/kasa-tapo-services
+EnvironmentFile=/etc/kasa-tapo-services/.env
+ExecStartPre=/opt/kasa-tapo-services/.venv/bin/kasa-tapo-bootstrap-go2rtc \
+    --output /etc/go2rtc/go2rtc.yaml
+ExecStart=/usr/local/bin/go2rtc -config /etc/go2rtc/go2rtc.yaml
+Restart=on-failure
+RestartSec=2
+
+# Hardening (looser than the gateway service because go2rtc needs to
+# bind UDP for WebRTC if you opt into it later; tighten if you stay on
+# MSE-only).
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/etc/go2rtc
+ProtectHome=true
+PrivateTmp=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
