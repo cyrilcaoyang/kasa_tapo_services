@@ -25,6 +25,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 import yaml
 
@@ -40,14 +41,24 @@ def _stream_name(camera: DeviceConfig, lens_id: str) -> str:
 def _rtsp_url(camera: DeviceConfig, lens_path: str) -> str:
     """Build the RTSP URL for a (camera, lens) pair.
 
-    Uses ``${VAR}`` placeholders so go2rtc itself substitutes the
-    credentials at runtime - this keeps the rendered file safe to commit
-    or inspect (the generated yaml never contains a plaintext password).
+    When credentials are present in the process environment, render them
+    directly and percent-encode URL-special characters. go2rtc does not
+    reliably expand ``${VAR}`` placeholders inside RTSP userinfo across
+    versions, and unescaped ``@`` / ``:`` / ``#`` characters break parsing.
+
+    If credentials are missing, retain placeholders so the generated shape is
+    still inspectable and ``warn_missing_credentials`` can tell the operator
+    what to set.
     """
 
-    user_var = f"${{{camera.id.upper()}_USER}}"
-    pass_var = f"${{{camera.id.upper()}_PASS}}"
-    return f"rtsp://{user_var}:{pass_var}@{camera.host}:{camera.rtsp_port}/{lens_path}"
+    creds = device_credentials(camera.id)
+    if creds.has_basic:
+        user = quote(creds.user or "", safe="")
+        password = quote(creds.password or "", safe="")
+    else:
+        user = f"${{{camera.id.upper()}_USER}}"
+        password = f"${{{camera.id.upper()}_PASS}}"
+    return f"rtsp://{user}:{password}@{camera.host}:{camera.rtsp_port}/{lens_path}"
 
 
 def render_go2rtc_yaml(

@@ -27,12 +27,26 @@ def test_render_go2rtc_yaml_origin_override(example_config: GatewayConfig) -> No
     assert payload["api"]["origin"] == "https://lab.example.com"
 
 
-def test_uses_env_var_placeholders_not_plaintext(example_config: GatewayConfig) -> None:
+def test_uses_env_var_placeholders_when_credentials_missing(example_config: GatewayConfig) -> None:
     payload = render_go2rtc_yaml(example_config)
     url = payload["streams"]["cam_lab499_west_wide"][0]
     assert "${CAM_LAB499_WEST_USER}" in url
     assert "${CAM_LAB499_WEST_PASS}" in url
     assert "192.168.1.42:554/stream1" in url
+
+
+def test_url_encodes_loaded_credentials(
+    example_config: GatewayConfig, monkeypatch
+) -> None:
+    monkeypatch.setenv("CAM_LAB499_WEST_USER", "camera:user")
+    monkeypatch.setenv("CAM_LAB499_WEST_PASS", "p@ss word#1")
+
+    payload = render_go2rtc_yaml(example_config)
+
+    url = payload["streams"]["cam_lab499_west_wide"][0]
+    assert "camera%3Auser" in url
+    assert "p%40ss%20word%231" in url
+    assert "${CAM_LAB499_WEST_USER}" not in url
 
 
 def test_disabled_devices_are_skipped() -> None:
