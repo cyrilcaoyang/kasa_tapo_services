@@ -1,0 +1,32 @@
+[Unit]
+Description=AC Organic Lab - go2rtc RTSP/MSE bridge for Tapo cameras
+After=network-online.target kasa-tapo-services.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sdl2
+Group=sdl2
+WorkingDirectory=/home/sdl2/caoyang/kasa_tapo_services
+EnvironmentFile=/etc/kasa-tapo-services/.env
+# Render go2rtc.yaml from devices.yaml at every (re)start so the stream
+# config stays consistent with the gateway's device registry.
+ExecStartPre=/home/sdl2/caoyang/kasa_tapo_services/.venv/bin/kasa-tapo-bootstrap-go2rtc \
+    --output /home/sdl2/.config/go2rtc/go2rtc.yaml
+ExecStart=/home/sdl2/.local/bin/go2rtc \
+    -config /home/sdl2/.config/go2rtc/go2rtc.yaml
+Restart=on-failure
+RestartSec=2
+
+NoNewPrivileges=true
+ProtectSystem=strict
+# ProtectHome=true omitted: binary, venv, and config all live under /home.
+PrivateTmp=true
+LimitNOFILE=65536
+ReadWritePaths=/home/sdl2/.config/go2rtc /home/sdl2/caoyang/kasa_tapo_services
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

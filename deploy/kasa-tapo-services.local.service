@@ -1,0 +1,38 @@
+[Unit]
+Description=AC Organic Lab - Kasa + Tapo gateway service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sdl2
+Group=sdl2
+WorkingDirectory=/home/sdl2/caoyang/kasa_tapo_services
+EnvironmentFile=/etc/kasa-tapo-services/.env
+Environment=KASA_TAPO_MEDIA_ROOT=/var/lib/kasa-tapo-media
+ExecStart=/home/sdl2/caoyang/kasa_tapo_services/.venv/bin/uvicorn \
+    kasa_tapo_services.main:app \
+    --host 127.0.0.1 \
+    --port 8002 \
+    --no-access-log
+Restart=on-failure
+RestartSec=2
+
+NoNewPrivileges=true
+ProtectSystem=strict
+# ProtectHome=true is intentionally omitted: the venv and source live
+# under /home/sdl2. ReadWritePaths covers only what the service writes.
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LimitNOFILE=65536
+ReadWritePaths=/var/lib/kasa-tapo-media /home/sdl2/caoyang/kasa_tapo_services
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
