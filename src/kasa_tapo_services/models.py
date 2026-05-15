@@ -166,6 +166,9 @@ class LensEntry(BaseModel):
     stream_connected: bool | None = None
     recording_active: bool = False
     recording_started_at: datetime | None = None
+    rolling_active: bool = False
+    rolling_started_at: datetime | None = None
+    rolling_segment_count: int = 0
 
 
 class SnapshotRequest(BaseModel):
@@ -236,6 +239,34 @@ class RecordingCancelResponse(BaseModel):
     recording_id: str
     canceled: bool = True
     deleted_path: str | None = None
+
+
+class RollingStartRequest(BaseModel):
+    """Start a rolling background recording on one lens."""
+
+    lens: str | None = Field(default=None, description="Lens id; defaults to the camera's first lens.")
+    segment_duration_s: int = Field(
+        default=1800,
+        ge=60,
+        le=7200,
+        description="Length of each rolling segment in seconds (default 30 min).",
+    )
+    max_segments: int = Field(
+        default=96,
+        ge=1,
+        le=1000,
+        description="Maximum number of completed segments to keep on disk; oldest deleted first.",
+    )
+    include_audio: bool = Field(
+        default=False,
+        description="Transcode PCMA microphone audio to AAC and include it in the MP4.",
+    )
+
+
+class RollingStopResponse(BaseModel):
+    ok: bool = True
+    message: str | None = None
+    segments_recorded: int = 0
 
 
 class CameraDetails(BaseModel):
@@ -312,6 +343,8 @@ __all__ = [
     "RecordingStartResponse",
     "RecordingStopRequest",
     "RecordingStopResponse",
+    "RollingStartRequest",
+    "RollingStopResponse",
     "SnapshotRequest",
     "SnapshotResponse",
     "StreamingRequest",

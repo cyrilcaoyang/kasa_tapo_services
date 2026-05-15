@@ -31,6 +31,8 @@ from kasa_tapo_services.models import (
     RecordingStartResponse,
     RecordingStopRequest,
     RecordingStopResponse,
+    RollingStartRequest,
+    RollingStopResponse,
     SnapshotRequest,
     SnapshotResponse,
     StreamingRequest,
@@ -40,7 +42,9 @@ from kasa_tapo_services.tapo.media import (
     RecordingHandle,
     list_camera_media,
     resolve_media_path,
+    _resolve_lens,
 )
+from kasa_tapo_services.tapo.rolling_recorder import RollingRecorder
 
 from .registry import CameraClients, DeviceRegistry, get_registry
 
@@ -457,6 +461,104 @@ def build_camera_router() -> APIRouter:
         return FileResponse(target, filename=target.name)
 
     @router.post(
+        "/{camera_id}/control/rolling/start",
+        response_model=ControlAck,
+        summary="Start continuous rolling recording on a lens",
+    )
+    async def rolling_start(
+        camera_id: CameraIdParam,
+        body: RollingStartRequest | None = None,
+        registry: DeviceRegistry = Depends(get_registry),
+    ) -> ControlAck:
+        bundle = registry.camera(camera_id)
+        cfg = bundle.config
+        body = body or RollingStartRequest()
+
+        # Resolve the lens so we can key the rolling dict correctly.
+        try:
+            resolved_lens, _, _ = _resolve_lens(cfg, body.lens)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        existing = bundle.rolling.get(resolved_lens)
+        if existing and existing.is_running:
+            raise HTTPException(
+                status_code=409,
+                detail=f"camera {cfg.id} lens {resolved_lens} already has a rolling recorder running",
+            )
+
+        creds = device_credentials(cfg.id)
+        if not creds.has_basic:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Camera {cfg.id!r} has no RTSP credentials; set {cfg.id.upper()}_USER / {cfg.id.upper()}_PASS",
+            )
+
+        recorder = RollingRecorder(
+            camera=cfg,
+            creds=creds,
+            media=registry.media,
+            lens_id=body.lens,
+            segment_duration_s=body.segment_duration_s,
+            max_segments=body.max_segments,
+            include_audio=body.include_audio,
+        )
+        recorder.start()
+        bundle.rolling[resolved_lens] = recorder
+
+        return ControlAck(
+            message=f"Rolling recorder started on lens {resolved_lens}",
+            state={
+                "lens": resolved_lens,
+                "segment_duration_s": body.segment_duration_s,
+                "max_segments": body.max_segments,
+                "include_audio": body.include_audio,
+            },
+        )
+
+    @router.post(
+        "/{camera_id}/control/rolling/stop",
+        response_model=RollingStopResponse,
+        summary="Stop the rolling recording on a lens and finalise the current segment",
+    )
+    async def rolling_stop(
+        camera_id: CameraIdParam,
+        lens: str | None = None,
+        registry: DeviceRegistry = Depends(get_registry),
+    ) -> RollingStopResponse:
+        bundle = registry.camera(camera_id)
+        cfg = bundle.config
+
+        if lens is not None:
+            try:
+                resolved_lens, _, _ = _resolve_lens(cfg, lens)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            recorders = {resolved_lens: bundle.rolling.get(resolved_lens)}
+        else:
+            recorders = dict(bundle.rolling)
+
+        running = {lid: r for lid, r in recorders.items() if r and r.is_running}
+        if not running:
+            raise HTTPException(
+                status_code=409,
+                detail=f"camera {cfg.id} has no active rolling recorder"
+                + (f" on lens {lens}" if lens else ""),
+            )
+
+        total_segments = 0
+        for lid, recorder in running.items():
+            total_segments += recorder.segments_recorded
+            await recorder.stop()
+            bundle.rolling.pop(lid, None)
+
+        return RollingStopResponse(
+            ok=True,
+            message=f"Rolling recorder stopped on {', '.join(running.keys())}",
+            segments_recorded=total_segments,
+        )
+
+    @router.post(
         "/{camera_id}/control/streaming",
         response_model=ControlAck,
         summary="Show or hide the camera's MSE feed in the dashboard",
@@ -532,6 +634,11 @@ async def _build_status(bundle: CameraClients, registry: DeviceRegistry) -> Equi
         h.lens_id: h for h in bundle.recordings.values() if h.is_running
     }
 
+    # Index active rolling recorders by lens_id.
+    active_rolling = {
+        lid: r for lid, r in bundle.rolling.items() if r.is_running
+    }
+
     # Per-lens stream health (informational only; we do not gate the
     # equipment_status on it).
     for lens in cfg.lenses or []:
@@ -545,6 +652,7 @@ async def _build_status(bundle: CameraClients, registry: DeviceRegistry) -> Equi
             except Exception as exc:
                 state = f"error: {exc}"
         rec = active_recordings.get(lens.id)
+        roller = active_rolling.get(lens.id)
         lenses.append(
             LensEntry(
                 id=lens.id,
@@ -559,6 +667,9 @@ async def _build_status(bundle: CameraClients, registry: DeviceRegistry) -> Equi
                 stream_connected=connected,
                 recording_active=rec is not None,
                 recording_started_at=rec.started_at if rec else None,
+                rolling_active=roller is not None,
+                rolling_started_at=roller.started_at if roller else None,
+                rolling_segment_count=roller.on_disk_count() if roller else 0,
             )
         )
         components[f"lens_{lens.id}"] = ComponentStatus(
@@ -609,7 +720,8 @@ async def _build_status(bundle: CameraClients, registry: DeviceRegistry) -> Equi
     # boot time they're guaranteed to still be present here. We always
     # advertise these so the UI can show the buttons even when ONVIF
     # is briefly down.
-    allowed += ["snapshot", "recording/start", "recording/stop", "recording/cancel"]
+    allowed += ["snapshot", "recording/start", "recording/stop", "recording/cancel",
+                "rolling/start", "rolling/stop"]
 
     return EquipmentStatus(
         equipment_id=cfg.id,

@@ -27,6 +27,7 @@ from kasa_tapo_services.config import (
 from kasa_tapo_services.kasa import KasaPlugClient
 from kasa_tapo_services.tapo import Go2RtcClient, OnvifCameraClient, TapoCameraClient
 from kasa_tapo_services.tapo.media import CameraMediaManager, RecordingHandle
+from kasa_tapo_services.tapo.rolling_recorder import RollingRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,9 @@ class CameraClients:
     # the dict shape lets future per-lens parallel recordings work
     # without a schema change.
     recordings: dict[str, RecordingHandle] = field(default_factory=dict)
+    # One rolling recorder per lens (keyed by resolved lens_id). None means
+    # no rolling recorder is active for that lens.
+    rolling: dict[str, RollingRecorder] = field(default_factory=dict)
 
 
 @dataclass
@@ -145,7 +149,20 @@ class DeviceRegistry:
         return list(self._plugs.values())
 
     async def aclose(self) -> None:
-        # Stop active recordings first - we want their .partial files
+        # Stop rolling recorders first so they don't start a new segment
+        # while we're shutting down manual recordings.
+        rolling_coros: list = []
+        for cam in self._cameras.values():
+            for recorder in list(cam.rolling.values()):
+                if recorder.is_running:
+                    rolling_coros.append(recorder.stop())
+        if rolling_coros:
+            logger.info("aclose: stopping %d rolling recorder(s)", len(rolling_coros))
+            await asyncio.gather(*rolling_coros, return_exceptions=True)
+        for cam in self._cameras.values():
+            cam.rolling.clear()
+
+        # Stop active recordings - we want their .partial files
         # finalised to .mp4 before any other shutdown work happens, and
         # we want to do it in parallel so a single hung ffmpeg can't
         # block the whole shutdown.

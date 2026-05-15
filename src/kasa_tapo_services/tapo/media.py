@@ -72,6 +72,11 @@ def _camera_recordings_dir(camera: DeviceConfig) -> Path:
     return _media_root() / "recordings" / camera.id
 
 
+def _camera_rolling_dir(camera: DeviceConfig) -> Path:
+    """Dedicated directory for rolling-recorder segments (separate from manual recordings)."""
+    return _media_root() / "rolling" / camera.id
+
+
 def _ts_filename(suffix: str, *, when: datetime | None = None) -> str:
     """Build a filesystem-safe ISO 8601 UTC timestamp filename."""
 
@@ -265,6 +270,8 @@ class CameraMediaManager:
         creds: DeviceCredentials,
         lens_id: str | None = None,
         max_duration_s: int | None = 3600,
+        include_audio: bool = False,
+        rolling: bool = False,
     ) -> RecordingHandle:
         """Start a long-running stream-copy ffmpeg subprocess.
 
@@ -276,7 +283,8 @@ class CameraMediaManager:
         """
 
         lens, _label, rtsp_path = _resolve_lens(camera, lens_id)
-        recordings_dir = _camera_recordings_dir(camera) / lens
+        base_dir = _camera_rolling_dir(camera) if rolling else _camera_recordings_dir(camera)
+        recordings_dir = base_dir / lens
         recordings_dir.mkdir(parents=True, exist_ok=True)
 
         started_at = datetime.now(tz=timezone.utc)
@@ -289,15 +297,22 @@ class CameraMediaManager:
         # ".partial", leaving ".mp4". That's exactly what we want.
 
         url = _rtsp_url(camera, rtsp_path, creds)
+        audio_args: list[str]
+        if include_audio:
+            # Tapo cameras stream PCMA (G.711 a-law) which MP4 won't mux natively;
+            # transcode to AAC at 64 kbps (speech-quality, minimal overhead).
+            audio_args = ["-c:a", "aac", "-b:a", "64k"]
+        else:
+            audio_args = ["-an"]
         argv = [
             self._ffmpeg,
             "-hide_banner",
             "-loglevel", "warning",
             "-rtsp_transport", "tcp",
             "-i", url,
-            "-c", "copy",
+            "-c:v", "copy",
+            *audio_args,
             "-movflags", "+faststart",
-            "-an",  # drop audio (PCMA from Tapo isn't worth keeping for lab footage; flip if requested)
             "-f", "mp4",
             str(partial),
         ]
@@ -488,6 +503,42 @@ def list_camera_media(camera: DeviceConfig) -> dict[str, list[dict]]:
     }
 
 
+def prune_rolling_recordings(camera: DeviceConfig, lens_id: str, max_segments: int) -> int:
+    """Delete the oldest rolling segments for ``lens_id`` until at most ``max_segments`` remain.
+
+    Returns the number of files deleted.  Safe to call even if the directory
+    doesn't exist yet (returns 0).
+    """
+
+    rolling_dir = _camera_rolling_dir(camera) / lens_id
+    if not rolling_dir.exists():
+        return 0
+
+    files = sorted(
+        [f for f in rolling_dir.iterdir() if f.is_file() and f.suffix == ".mp4"],
+        key=lambda p: p.stat().st_mtime,
+    )
+    deleted = 0
+    while len(files) > max_segments:
+        oldest = files.pop(0)
+        try:
+            oldest.unlink()
+            logger.info("rolling prune: deleted %s", oldest)
+            deleted += 1
+        except OSError:
+            logger.exception("rolling prune: failed to delete %s", oldest)
+    return deleted
+
+
+def count_rolling_recordings(camera: DeviceConfig, lens_id: str) -> int:
+    """Return the number of completed rolling segments on disk for ``lens_id``."""
+
+    rolling_dir = _camera_rolling_dir(camera) / lens_id
+    if not rolling_dir.exists():
+        return 0
+    return sum(1 for f in rolling_dir.iterdir() if f.is_file() and f.suffix == ".mp4")
+
+
 def resolve_media_path(
     camera: DeviceConfig,
     *,
@@ -522,6 +573,8 @@ def resolve_media_path(
 
 __all__ = [
     "CameraMediaManager",
+    "count_rolling_recordings",
+    "prune_rolling_recordings",
     "RecordingHandle",
     "list_camera_media",
     "resolve_media_path",
