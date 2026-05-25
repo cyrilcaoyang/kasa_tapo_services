@@ -26,7 +26,10 @@ class OutletState:
     label: str | None
     is_on: bool
     power_w: float | None = None
-    energy_wh_today: float | None = None
+    voltage_v: float | None = None
+    current_a: float | None = None
+    energy_kwh_today: float | None = None
+    energy_kwh_total: float | None = None
 
 
 @dataclass(frozen=True)
@@ -111,8 +114,11 @@ class KasaPlugClient:
                         index=idx,
                         label=getattr(child, "alias", None),
                         is_on=bool(getattr(child, "is_on", False)),
-                        power_w=_safe_float(_get_emeter_attr(child, "power")),
-                        energy_wh_today=_safe_float(_get_emeter_attr(child, "today_energy")),
+                        power_w=_safe_float(_emeter(child, "current_consumption", "power")),
+                        voltage_v=_safe_float(_emeter(child, "voltage")),
+                        current_a=_safe_float(_emeter(child, "current")),
+                        energy_kwh_today=_safe_float(_emeter(child, "consumption_today")),
+                        energy_kwh_total=_safe_float(_emeter(child, "consumption_total", "total")),
                     )
                 )
             aggregate_on = any(o.is_on for o in outlets)
@@ -199,20 +205,44 @@ def _credentials(username: str, password: str) -> Any:  # pragma: no cover - thi
     return Credentials(username, password)
 
 
-def _get_emeter_attr(device: Any, attr: str) -> Any:
-    """python-kasa's emeter attributes live on either the device itself
-    (older versions) or a ``device.emeter_realtime`` mapping (newer).
+def _emeter(device: Any, *attrs: str) -> Any:
+    """Return the first non-None emeter value found across the given attribute names.
 
-    Returns ``None`` for devices without an energy meter.
+    Resolution order for python-kasa >= 0.7:
+    1. ``device.modules["Energy"].<attr>`` (preferred — canonical on HS300).
+    2. ``device.emeter_realtime[attr]`` (deprecated mapping, still populated).
+    3. Direct attribute on device (older kasa versions).
+
+    Accepts multiple ``attrs`` so callers can pass both the modern name
+    (``"consumption_today"``) and the legacy name (``"today_energy"``) in one
+    call and get the first hit.
     """
+
+    modules = getattr(device, "modules", {}) or {}
+    em = modules.get("Energy") or modules.get("emeter")
+    if em is not None:
+        for attr in attrs:
+            val = getattr(em, attr, None)
+            if val is not None:
+                return val
 
     realtime = getattr(device, "emeter_realtime", None)
     if realtime is not None:
-        try:
-            return realtime[attr]
-        except Exception:
-            return getattr(realtime, attr, None)
-    return getattr(device, attr, None)
+        for attr in attrs:
+            try:
+                val = realtime[attr]
+                if val is not None:
+                    return val
+            except Exception:
+                val = getattr(realtime, attr, None)
+                if val is not None:
+                    return val
+
+    for attr in attrs:
+        val = getattr(device, attr, None)
+        if val is not None:
+            return val
+    return None
 
 
 def _safe_float(value: Any) -> float | None:

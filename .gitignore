@@ -17,3 +17,8 @@ devices.yaml
 # GO2RTC_CONFIG_PATH points; we sometimes render it next to the source
 # tree for local dev.
 go2rtc.yaml
+
+# Claude Code (CLAUDE.md and .claude/settings.json are committed; only personal overrides are ignored)
+.claude/settings.local.json
+CLAUDE.local.md
+CLAUDE.md

@@ -153,12 +153,24 @@ async def _build_status(bundle: PlugClients) -> EquipmentStatus:
                 metrics[f"power_outlet_{outlet.index}"] = MetricValue(
                     value=round(outlet.power_w, 2), unit="W"
                 )
+            if outlet.current_a is not None:
+                metrics[f"current_outlet_{outlet.index}"] = MetricValue(
+                    value=round(outlet.current_a, 3), unit="A"
+                )
+            if outlet.energy_kwh_today is not None:
+                metrics[f"energy_kwh_today_outlet_{outlet.index}"] = MetricValue(
+                    value=round(outlet.energy_kwh_today, 4), unit="kWh"
+                )
         details["outlets"] = [
             {
                 "index": outlet.index,
                 "label": labels_by_index.get(outlet.index) or outlet.label,
                 "is_on": outlet.is_on,
                 "power_w": outlet.power_w,
+                "voltage_v": outlet.voltage_v,
+                "current_a": outlet.current_a,
+                "energy_kwh_today": outlet.energy_kwh_today,
+                "energy_kwh_total": outlet.energy_kwh_total,
             }
             for outlet in state.outlets
         ]
