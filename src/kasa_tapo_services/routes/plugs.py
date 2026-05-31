@@ -66,6 +66,12 @@ def build_plug_router() -> APIRouter:
         registry: DeviceRegistry = Depends(get_registry),
     ) -> EquipmentStatus:
         bundle = registry.plug(plug_id)
+        cached = registry.status_cache.get(plug_id)
+        if cached is not None:
+            return cached
+        # Cold-start fallback: no poller has populated the cache yet
+        # (e.g. test harness, or first request before the first poll
+        # completes). Build live so the dashboard never sees a 404.
         return await _build_status(bundle)
 
     @router.post(
@@ -78,7 +84,9 @@ def build_plug_router() -> APIRouter:
         body: PlugSwitchRequest | None = None,
         registry: DeviceRegistry = Depends(get_registry),
     ) -> ControlAck:
-        return await _switch(registry.plug(plug_id), "on", body)
+        ack = await _switch(registry.plug(plug_id), "on", body)
+        _wake_poller(registry, plug_id)
+        return ack
 
     @router.post(
         "/{plug_id}/control/off",
@@ -90,7 +98,9 @@ def build_plug_router() -> APIRouter:
         body: PlugSwitchRequest | None = None,
         registry: DeviceRegistry = Depends(get_registry),
     ) -> ControlAck:
-        return await _switch(registry.plug(plug_id), "off", body)
+        ack = await _switch(registry.plug(plug_id), "off", body)
+        _wake_poller(registry, plug_id)
+        return ack
 
     @router.post(
         "/{plug_id}/control/toggle",
@@ -102,9 +112,19 @@ def build_plug_router() -> APIRouter:
         body: PlugSwitchRequest | None = None,
         registry: DeviceRegistry = Depends(get_registry),
     ) -> ControlAck:
-        return await _switch(registry.plug(plug_id), "toggle", body)
+        ack = await _switch(registry.plug(plug_id), "toggle", body)
+        _wake_poller(registry, plug_id)
+        return ack
 
     return router
+
+
+def _wake_poller(registry: DeviceRegistry, device_id: str) -> None:
+    """Tell the background poller to refresh now instead of waiting out the interval."""
+
+    poller = registry.poller(device_id)
+    if poller is not None:
+        poller.request_refresh()
 
 
 # ---------------------------------------------------------------------

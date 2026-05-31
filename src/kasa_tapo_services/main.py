@@ -30,11 +30,30 @@ def _cors_origins() -> list[str]:
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
+def _poll_interval_env(name: str) -> float | None:
+    raw = os.environ.get(name)
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("%s=%r is not a number, ignoring", name, raw)
+        return None
+    if value <= 0:
+        logger.warning("%s=%r must be > 0, ignoring", name, raw)
+        return None
+    return value
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     registry: DeviceRegistry = await build_registry_from_disk()
     app.state.registry = registry
     app.state.boot_time = datetime.now(timezone.utc)
+    registry.start_pollers(
+        plug_interval_s=_poll_interval_env("KASA_TAPO_PLUG_POLL_INTERVAL_S"),
+        camera_interval_s=_poll_interval_env("KASA_TAPO_CAMERA_POLL_INTERVAL_S"),
+    )
     logger.info(
         "kasa-tapo-services up: %d cameras, %d plugs",
         len(registry.list_cameras()),

@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from kasa_tapo_services.config import GatewayConfig, MediaConfig
 from kasa_tapo_services.kasa.plug_client import OutletState, PlugState
 from kasa_tapo_services.models import PresetEntry
+from kasa_tapo_services.poller import StatusCache
 from kasa_tapo_services.routes import build_camera_router, build_plug_router
 from kasa_tapo_services.routes.registry import CameraClients, DeviceRegistry, PlugClients
 from kasa_tapo_services.tapo.media import RecordingHandle
@@ -179,6 +180,8 @@ class StubRegistry(DeviceRegistry):
         go2rtc.close = _AM()
         self._go2rtc = go2rtc  # type: ignore[assignment]
         self._media = _stub_media_manager(media_root)  # type: ignore[assignment]
+        self._status_cache = StatusCache()
+        self._pollers = {}
 
         for device in config.devices:
             if not device.enabled:

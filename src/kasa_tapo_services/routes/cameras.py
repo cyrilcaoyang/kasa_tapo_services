@@ -123,6 +123,10 @@ def build_camera_router() -> APIRouter:
         registry: DeviceRegistry = Depends(get_registry),
     ) -> EquipmentStatus:
         bundle = registry.camera(camera_id)
+        cached = registry.status_cache.get(camera_id)
+        if cached is not None:
+            return cached
+        # Cold-start fallback: same reasoning as the plug `/status` route.
         return await _build_status(bundle, registry)
 
     @router.post(
@@ -246,6 +250,7 @@ def build_camera_router() -> APIRouter:
         except Exception as exc:
             logger.exception("privacy toggle failed for %s", camera_id)
             raise HTTPException(status_code=502, detail=f"Privacy toggle failed: {exc}") from exc
+        _wake_poller(registry, camera_id)
         return ControlAck(state={"privacy_mode": body.enabled})
 
     @router.post(
@@ -338,6 +343,7 @@ def build_camera_router() -> APIRouter:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         bundle.recordings[handle.recording_id] = handle
+        _wake_poller(registry, camera_id)
         return RecordingStartResponse(
             recording_id=handle.recording_id,
             path=str(handle.target_path),
@@ -394,6 +400,7 @@ def build_camera_router() -> APIRouter:
 
         stopped_at = datetime.now(timezone.utc)
         bundle.recordings.pop(handle.recording_id, None)
+        _wake_poller(registry, camera_id)
         return RecordingStopResponse(
             recording_id=handle.recording_id,
             path=str(final_path),
@@ -423,6 +430,7 @@ def build_camera_router() -> APIRouter:
             logger.exception("recording cancel failed for %s", handle.recording_id)
             raise HTTPException(status_code=502, detail=f"Cancel failed: {exc}") from exc
         bundle.recordings.pop(handle.recording_id, None)
+        _wake_poller(registry, camera_id)
         return RecordingCancelResponse(
             recording_id=handle.recording_id,
             deleted_path=str(deleted) if deleted else None,
@@ -505,6 +513,7 @@ def build_camera_router() -> APIRouter:
         )
         recorder.start()
         bundle.rolling[resolved_lens] = recorder
+        _wake_poller(registry, camera_id)
 
         return ControlAck(
             message=f"Rolling recorder started on lens {resolved_lens}",
@@ -551,6 +560,7 @@ def build_camera_router() -> APIRouter:
             total_segments += recorder.segments_recorded
             await recorder.stop()
             bundle.rolling.pop(lid, None)
+        _wake_poller(registry, camera_id)
 
         return RollingStopResponse(
             ok=True,
@@ -578,9 +588,18 @@ def build_camera_router() -> APIRouter:
         # WebSocket, and go2rtc drops back to its idle no-consumer state.
         bundle = registry.camera(camera_id)
         bundle.streaming_enabled = body.enabled
+        _wake_poller(registry, camera_id)
         return ControlAck(state={"streaming_enabled": body.enabled})
 
     return router
+
+
+def _wake_poller(registry: DeviceRegistry, device_id: str) -> None:
+    """Tell the background poller to refresh now instead of waiting out the interval."""
+
+    poller = registry.poller(device_id)
+    if poller is not None:
+        poller.request_refresh()
 
 
 # ---------------------------------------------------------------------

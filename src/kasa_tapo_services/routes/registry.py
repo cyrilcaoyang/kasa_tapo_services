@@ -25,6 +25,7 @@ from kasa_tapo_services.config import (
     load_config,
 )
 from kasa_tapo_services.kasa import KasaPlugClient
+from kasa_tapo_services.poller import DevicePoller, StatusCache
 from kasa_tapo_services.tapo import Go2RtcClient, OnvifCameraClient, TapoCameraClient
 from kasa_tapo_services.tapo.media import CameraMediaManager, RecordingHandle
 from kasa_tapo_services.tapo.rolling_recorder import RollingRecorder
@@ -74,12 +75,21 @@ class PlugClients:
 class DeviceRegistry:
     """One process-wide registry; constructed in :func:`main.lifespan`."""
 
+    # Default poll cadences. Plugs are fast-changing (operator-driven
+    # outlet toggles) so we refresh frequently; cameras are slower per
+    # cycle (ONVIF SOAP) and their state changes rarely, so a longer
+    # interval is enough.
+    DEFAULT_PLUG_POLL_INTERVAL_S: float = 2.0
+    DEFAULT_CAMERA_POLL_INTERVAL_S: float = 5.0
+
     def __init__(self, config: GatewayConfig) -> None:
         self._config = config
         self._cameras: dict[str, CameraClients] = {}
         self._plugs: dict[str, PlugClients] = {}
         self._go2rtc = Go2RtcClient()
         self._media = CameraMediaManager()
+        self._status_cache = StatusCache()
+        self._pollers: dict[str, DevicePoller] = {}
         self._build()
 
     def _build(self) -> None:
@@ -130,6 +140,16 @@ class DeviceRegistry:
     def media(self) -> CameraMediaManager:
         return self._media
 
+    @property
+    def status_cache(self) -> StatusCache:
+        return self._status_cache
+
+    def poller(self, device_id: str) -> DevicePoller | None:
+        """Return the background poller for a device, or None when none is
+        running (e.g. under the test harness's stub registry)."""
+
+        return self._pollers.get(device_id)
+
     def camera(self, device_id: str) -> CameraClients:
         bundle = self._cameras.get(device_id)
         if bundle is None:
@@ -148,7 +168,81 @@ class DeviceRegistry:
     def list_plugs(self) -> list[PlugClients]:
         return list(self._plugs.values())
 
+    def start_pollers(
+        self,
+        *,
+        plug_interval_s: float | None = None,
+        camera_interval_s: float | None = None,
+    ) -> None:
+        """Spawn one :class:`DevicePoller` per device.
+
+        Builders are imported lazily here because the routes modules
+        depend on :class:`DeviceRegistry`, so the inverse direction would
+        be a circular import at module load time.
+        """
+
+        # Local import to break the circular dependency with routes.*.
+        from kasa_tapo_services.routes.cameras import _build_status as _build_camera_status
+        from kasa_tapo_services.routes.plugs import _build_status as _build_plug_status
+
+        plug_interval = plug_interval_s or self.DEFAULT_PLUG_POLL_INTERVAL_S
+        camera_interval = camera_interval_s or self.DEFAULT_CAMERA_POLL_INTERVAL_S
+
+        for device_id, bundle in self._plugs.items():
+            if device_id in self._pollers:
+                continue
+
+            async def _build(bundle=bundle):
+                return await _build_plug_status(bundle)
+
+            poller = DevicePoller(
+                device_id=device_id,
+                interval_s=plug_interval,
+                builder=_build,
+                cache=self._status_cache,
+            )
+            poller.start()
+            self._pollers[device_id] = poller
+
+        for device_id, bundle in self._cameras.items():
+            if device_id in self._pollers:
+                continue
+
+            async def _build(bundle=bundle):
+                return await _build_camera_status(bundle, self)
+
+            poller = DevicePoller(
+                device_id=device_id,
+                interval_s=camera_interval,
+                builder=_build,
+                cache=self._status_cache,
+            )
+            poller.start()
+            self._pollers[device_id] = poller
+
+        if self._pollers:
+            logger.info(
+                "started %d device poller(s) (plug %.1fs, camera %.1fs)",
+                len(self._pollers),
+                plug_interval,
+                camera_interval,
+            )
+
+    async def stop_pollers(self) -> None:
+        if not self._pollers:
+            return
+        await asyncio.gather(
+            *(poller.stop() for poller in self._pollers.values()),
+            return_exceptions=True,
+        )
+        self._pollers.clear()
+
     async def aclose(self) -> None:
+        # Stop background pollers first so they cannot race with the
+        # connection teardown below by trying to drive a device whose
+        # underlying client has just been closed.
+        await self.stop_pollers()
+
         # Stop rolling recorders first so they don't start a new segment
         # while we're shutting down manual recordings.
         rolling_coros: list = []
