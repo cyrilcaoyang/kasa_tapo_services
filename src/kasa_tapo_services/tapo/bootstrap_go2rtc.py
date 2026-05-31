@@ -66,6 +66,8 @@ def render_go2rtc_yaml(
     *,
     listen: str = "127.0.0.1:1984",
     origin: str = "*",
+    webrtc_listen: str | None = "0.0.0.0:8555/tcp",
+    webrtc_host: str | None = None,
 ) -> dict:
     streams: dict[str, list[str]] = {}
     for camera in config.cameras():
@@ -75,7 +77,7 @@ def render_go2rtc_yaml(
             continue
         for lens in camera.lenses:
             streams[_stream_name(camera, lens.id)] = [_rtsp_url(camera, lens.rtsp_path)]
-    return {
+    payload: dict = {
         # `api.origin` controls the WebSocket Origin allow-list. We default
         # to `*` because go2rtc is bound to loopback (`api.listen`
         # `127.0.0.1:1984`) and only reachable from the same host - the
@@ -89,6 +91,33 @@ def render_go2rtc_yaml(
         # only consumes the MSE feed which is a passthrough copy.
         "streams": streams,
     }
+
+    # Optional WebRTC opt-in. The MSE pipeline (port 1984, exposed via
+    # Caddy at /streams/*) keeps working alongside this — the dashboard
+    # picks one of the two protocols per <video> element. We default to
+    # TCP-only because UDP through Caddy/Tailscale needs additional
+    # firewall coordination and ICE candidate plumbing. TCP is slightly
+    # higher latency than UDP but still 5–10× better than MSE and works
+    # over any path that already allows the browser to reach the
+    # dashboard host.
+    if webrtc_listen:
+        webrtc: dict = {"listen": webrtc_listen}
+        # `webrtc.candidates` is what go2rtc advertises to the browser as
+        # the address to connect to. Without it the browser would try to
+        # connect to whatever ICE thinks is the server's address — which
+        # for a server behind Caddy on a Tailnet is usually wrong.
+        if webrtc_host:
+            # Strip any port the caller passed in; we always pair the
+            # candidate with the same port as `listen`.
+            host = webrtc_host.split(":", 1)[0]
+            port = webrtc_listen.split("/", 1)[0].rsplit(":", 1)[-1]
+            webrtc["candidates"] = [f"{host}:{port}"]
+        # Tailnet-private deployment: no STUN/TURN. Listing an empty
+        # ice_servers keeps go2rtc from auto-discovering anything.
+        webrtc["ice_servers"] = []
+        payload["webrtc"] = webrtc
+
+    return payload
 
 
 def write_yaml(target: Path, payload: dict) -> None:
@@ -144,15 +173,56 @@ def main(argv: list[str] | None = None) -> int:
             "proxy that terminates TLS on the same origin as the dashboard."
         ),
     )
+    parser.add_argument(
+        "--webrtc-listen",
+        default=os.environ.get("GO2RTC_WEBRTC_LISTEN", "0.0.0.0:8555/tcp"),
+        help=(
+            "webrtc.listen address (default: '0.0.0.0:8555/tcp'). Set to "
+            "empty string to disable the WebRTC block entirely (MSE keeps "
+            "working). UDP is supported by go2rtc ('0.0.0.0:8555') but "
+            "default is TCP-only — friendlier to Caddy/Tailscale routing."
+        ),
+    )
+    parser.add_argument(
+        "--webrtc-host",
+        default=os.environ.get("GO2RTC_WEBRTC_HOST"),
+        help=(
+            "Hostname (or IP) the browser should use to connect for "
+            "WebRTC media. Typically the dashboard host's Tailscale "
+            "MagicDNS name (e.g. gaia.tail6a1dd7.ts.net). When unset, "
+            "go2rtc tries to auto-detect, which often picks the wrong "
+            "interface on multi-homed hosts."
+        ),
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     config = load_config(args.devices)
     warn_missing_credentials(config)
-    payload = render_go2rtc_yaml(config, listen=args.listen, origin=args.origin)
+    # Empty --webrtc-listen disables the WebRTC block (MSE keeps working).
+    webrtc_listen = args.webrtc_listen or None
+    payload = render_go2rtc_yaml(
+        config,
+        listen=args.listen,
+        origin=args.origin,
+        webrtc_listen=webrtc_listen,
+        webrtc_host=args.webrtc_host,
+    )
     target = Path(args.output)
     write_yaml(target, payload)
+    if "webrtc" in payload:
+        logger.info(
+            "WebRTC enabled: listen=%s candidates=%s",
+            payload["webrtc"]["listen"],
+            payload["webrtc"].get("candidates", []),
+        )
+        if not payload["webrtc"].get("candidates"):
+            logger.warning(
+                "GO2RTC_WEBRTC_HOST is unset — browsers may receive an "
+                "unreachable ICE candidate. Set to the dashboard's "
+                "MagicDNS hostname (e.g. gaia.tail6a1dd7.ts.net)."
+            )
     logger.info("Wrote %d streams to %s", len(payload["streams"]), target)
     return 0
 

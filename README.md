@@ -79,6 +79,34 @@ uv run kasa-tapo-bootstrap-go2rtc
 
 The gateway binds to `127.0.0.1` by default. The dashboard's reverse proxy (Caddy) is the only thing that should hit `:8002` directly.
 
+### Video latency: MSE vs WebRTC
+
+The bridge ships two protocols to the browser side-by-side; dashboards
+pick per-`<video>` element.
+
+| Protocol | Port path | Typical latency | Notes |
+|----------|-----------|-----------------|-------|
+| **MSE**     | WebSocket via `/streams/*` (Caddy → go2rtc :1984) | 0.5 – 1.5 s | No special firewalling; works through any HTTP reverse proxy. Default; good enough for static observation. |
+| **WebRTC**  | Signaling via `/streams/api/webrtc`, **media via TCP `:8555` direct** to dashboard host | 100 – 300 ms | Lower latency makes PTZ feel real-time. TCP-only by default so Tailscale ACLs only need one port hole. |
+
+WebRTC is enabled by default in the rendered `go2rtc.yaml`. Point the
+browser at the right host by setting one env var in
+`/etc/kasa-tapo-services/.env`:
+
+```
+GO2RTC_WEBRTC_HOST=gaia.tail6a1dd7.ts.net   # dashboard's MagicDNS name
+```
+
+The bootstrap renders this into `webrtc.candidates`, so the browser
+opens its TCP connection to `<host>:8555` directly (raw DTLS/SRTP — no
+HTTP, no Caddy passthrough). To disable WebRTC entirely and stay
+MSE-only, set `GO2RTC_WEBRTC_LISTEN=` (empty string).
+
+> The dashboard's `MsePlayer` is the consumer today. A `WebRtcPlayer`
+> swap lands in a follow-up PR on `ac-organic-lab/web/` — until then,
+> the renderer is forward-compatible and harmless: MSE keeps working
+> exactly as before.
+
 ## Wire into the dashboard
 
 In `ac-organic-lab/equipment.yaml`:

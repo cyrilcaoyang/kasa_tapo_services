@@ -49,6 +49,55 @@ def test_url_encodes_loaded_credentials(
     assert "${CAM_LAB499_WEST_USER}" not in url
 
 
+def test_webrtc_block_present_by_default(example_config: GatewayConfig) -> None:
+    """TCP-only WebRTC listen with no candidates by default."""
+
+    payload = render_go2rtc_yaml(example_config)
+    assert "webrtc" in payload
+    webrtc = payload["webrtc"]
+    assert webrtc["listen"] == "0.0.0.0:8555/tcp"
+    # No host configured => no candidates list; go2rtc falls back to
+    # autodiscovery (correct on single-homed dev hosts).
+    assert "candidates" not in webrtc
+    # Private tailnet: no STUN/TURN auto-discovery.
+    assert webrtc["ice_servers"] == []
+
+
+def test_webrtc_block_with_host_renders_candidate(
+    example_config: GatewayConfig,
+) -> None:
+    payload = render_go2rtc_yaml(
+        example_config,
+        webrtc_host="gaia.tail6a1dd7.ts.net",
+    )
+    assert payload["webrtc"]["candidates"] == [
+        "gaia.tail6a1dd7.ts.net:8555"
+    ]
+
+
+def test_webrtc_host_strips_user_supplied_port(
+    example_config: GatewayConfig,
+) -> None:
+    """Caller passing host:port shouldn't double-port the candidate."""
+
+    payload = render_go2rtc_yaml(
+        example_config,
+        webrtc_host="gaia.tail6a1dd7.ts.net:9999",
+    )
+    # Port is always paired with the listen-port (8555), not the value
+    # the caller might paste in by accident.
+    assert payload["webrtc"]["candidates"] == [
+        "gaia.tail6a1dd7.ts.net:8555"
+    ]
+
+
+def test_webrtc_disabled_when_listen_empty(example_config: GatewayConfig) -> None:
+    """Empty webrtc_listen drops the section entirely (MSE-only mode)."""
+
+    payload = render_go2rtc_yaml(example_config, webrtc_listen=None)
+    assert "webrtc" not in payload
+
+
 def test_disabled_devices_are_skipped() -> None:
     cfg = GatewayConfig.model_validate(
         {

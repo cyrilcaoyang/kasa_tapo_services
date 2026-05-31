@@ -1,5 +1,5 @@
 [Unit]
-Description=AC Organic Lab - go2rtc RTSP/MSE bridge for Tapo cameras
+Description=AC Organic Lab - go2rtc RTSP/MSE/WebRTC bridge for Tapo cameras
 After=network-online.target kasa-tapo-services.service
 Wants=network-online.target
 
