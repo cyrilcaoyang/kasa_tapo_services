@@ -149,7 +149,12 @@ async def _build_status(bundle: PlugClients) -> EquipmentStatus:
             equipment_name=cfg.name,
             equipment_kind=cfg.kind,
             host=cfg.host,
-            equipment_status="error",
+            # Unreachable plug: we cannot determine on/off state, so this is
+            # "unknown" (state cannot be determined), NOT "error" (which is
+            # reserved for a fault the hardware itself reports). See
+            # STATUS_SPEC EquipmentState semantics. The reason is carried in
+            # `message` for the dashboard's detail panel.
+            equipment_status="unknown",
             message=error_message or "Kasa device unreachable",
             device_time=datetime.now(timezone.utc),
         )

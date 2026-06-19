@@ -210,3 +210,24 @@ Tests use mocked Tapo/ONVIF/Kasa clients - they do not require live hardware.
   * `privacy_mode: bool`
   * `streaming_enabled: bool`
 * For power strips, `components` contains one `ComponentStatus` per outlet (`outlet_0`, `outlet_1`, …).
+
+### Reachability and `equipment_status` (unreachable backing hardware)
+
+This gateway fronts hardware (cameras, plugs) over the lab LAN. When the
+gateway process is healthy but **cannot reach the backing device** (LAN down,
+power off — e.g. `No route to host`, or a camera where neither ONVIF nor the
+Tapo API responds), `/status` still returns **HTTP 200** (the gateway itself is
+alive, per spec best-practice #2) and reports:
+
+* `equipment_status: "unknown"` — the device's state *cannot be determined*.
+  This is deliberately **not** `error`: nothing faulted, we simply can't reach
+  it. `error` / `degraded` are reserved for a *reachable* device whose subsystem
+  reports a fault (e.g. camera answering ONVIF but with go2rtc down → `degraded`).
+* `message` carries the reason (e.g. `"Camera unreachable: neither ONVIF nor
+  Tapo API responded"`).
+
+The dashboard renders a gateway-fronted device reporting `unknown` as
+**"unreachable"** (offline / counted as down), since the gateway answering 200
+means there is no transport-level `fetch_error` for the aggregator to key on.
+See the lab contract's [`STATUS_SPEC.md` §2.1 — `unknown` vs `error` vs
+"unreachable"](../ac-organic-lab/docs/STATUS_SPEC.md) for the normative rules.

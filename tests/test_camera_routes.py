@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 from fastapi.testclient import TestClient
 
 
@@ -29,6 +31,23 @@ def test_status_envelope(client: TestClient) -> None:
     assert details["onvif_reachable"] is True
     assert details["go2rtc_reachable"] is True
     assert "preset/save" in body["allowed_actions"]
+
+
+def test_unreachable_camera_reports_unknown_not_error(
+    client: TestClient, stub_registry
+) -> None:
+    """A camera the gateway cannot reach at all (ONVIF + Tapo both down) is
+    `unknown` (state undeterminable), not `error` (which is reserved for a
+    reachable camera whose subsystem reports a fault)."""
+
+    cam = stub_registry.camera("cam_lab499_west")
+    cam.onvif.is_reachable = AsyncMock(return_value=False)
+    cam.tapo.privacy_mode = AsyncMock(return_value=None)
+    r = client.get("/cameras/cam_lab499_west/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["equipment_status"] == "unknown"
+    assert "unreachable" in body["message"].lower()
 
 
 def test_ptz_nudge(client: TestClient) -> None:

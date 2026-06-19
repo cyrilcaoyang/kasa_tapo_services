@@ -50,6 +50,23 @@ def test_toggle_smart_plug(client: TestClient) -> None:
     assert r.json()["state"]["is_on"] is True
 
 
+def test_unreachable_plug_reports_unknown_not_error(
+    client: TestClient, stub_registry
+) -> None:
+    """A plug the gateway cannot reach is `unknown` (state undeterminable),
+    not `error` (reserved for a fault the hardware itself reports)."""
+
+    stub_registry.plug("plug_balance_lamp").kasa.state.side_effect = OSError(
+        "Unable to connect to the device: 172.31.60.19:9999: "
+        "[Errno 113] No route to host"
+    )
+    r = client.get("/plugs/plug_balance_lamp/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["equipment_status"] == "unknown"
+    assert "No route to host" in body["message"]
+
+
 def test_outlet_index_validation(client: TestClient, stub_registry) -> None:
     """A bad outlet that the model accepts but python-kasa rejects bubbles up as 400."""
 

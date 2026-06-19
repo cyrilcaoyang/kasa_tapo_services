@@ -714,8 +714,13 @@ async def _build_status(bundle: CameraClients, registry: DeviceRegistry) -> Equi
         equipment_state = "degraded"
         last_error_message = "Tapo API up but ONVIF unreachable; PTZ disabled"
     else:
-        equipment_state = "error"
-        last_error_message = "Neither ONVIF nor Tapo API responded"
+        # Nothing on the camera responded — it is completely unreachable
+        # (e.g. its LAN is down), so its state cannot be determined. That is
+        # "unknown", NOT "error": error is reserved for a reachable camera
+        # whose subsystem reports a fault (the degraded branches above). See
+        # STATUS_SPEC EquipmentState semantics.
+        equipment_state = "unknown"
+        last_error_message = "Camera unreachable: neither ONVIF nor Tapo API responded"
 
     details = CameraDetails(
         lenses=lenses,
