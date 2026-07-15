@@ -19,11 +19,43 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any
 
 from kasa_tapo_services.models import PresetEntry
 
 logger = logging.getLogger(__name__)
+
+# PTZ-limit detection tuning (validated live on Tapo C245D, 2026-07-14):
+# position reads in the ONVIF generic space [-1, 1] have ~1e-3 granularity
+# and pin exactly at the range edge when the head hits a physical limit,
+# while ``MoveStatus`` stays ``UNKNOWN`` — so a before/after position delta
+# is the only reliable limit signal on this hardware.
+_LIMIT_EPSILON = 0.005
+# |velocity| * duration_ms below which a commanded move is too small to
+# observe (~0.03 generic units on a C245) — skip detection rather than
+# false-positive a "limit" on a no-op nudge.
+_MIN_DETECTABLE_CMD = 40.0
+# Seconds to let the reported position settle after Stop before re-reading.
+_POSITION_SETTLE_S = 0.3
+
+
+@dataclass(frozen=True)
+class PtzNudgeOutcome:
+    """Result of a :meth:`OnvifCameraClient.nudge`.
+
+    ``limited_axes`` lists commanded axes whose position did not change —
+    the head is at that axis's physical pan/tilt limit. ``detected`` is
+    False when detection could not run (position unreadable, or the
+    commanded move was too small to observe); the nudge itself still ran.
+    """
+
+    limited_axes: tuple[str, ...] = ()
+    detected: bool = False
+
+    @property
+    def limit_hit(self) -> bool:
+        return bool(self.limited_axes)
 
 
 class OnvifError(RuntimeError):
@@ -154,11 +186,41 @@ class OnvifCameraClient:
         except Exception as exc:  # pragma: no cover - best-effort cleanup
             logger.warning("ONVIF deferred stop failed: %s", exc)
 
-    async def nudge(self, pan: float, tilt: float, zoom: float, duration_ms: int) -> None:
+    async def get_position(self) -> tuple[float, float] | None:
+        """Current (pan, tilt) in the ONVIF generic space, or None.
+
+        Returns None instead of raising when the camera doesn't report a
+        position (or the read fails) so callers can degrade gracefully.
+        """
+
+        try:
+            await self._connect()
+            assert self._ptz is not None and self._media_token is not None
+            status = await self._ptz.GetStatus({"ProfileToken": self._media_token})
+            pan_tilt = getattr(getattr(status, "Position", None), "PanTilt", None)
+            if pan_tilt is None:
+                return None
+            return float(pan_tilt.x), float(pan_tilt.y)
+        except Exception as exc:
+            logger.debug("ONVIF GetStatus position read failed: %s", exc)
+            return None
+
+    async def nudge(self, pan: float, tilt: float, zoom: float, duration_ms: int) -> PtzNudgeOutcome:
         """Start a continuous move and stop it after ``duration_ms``.
 
         Awaits the stop so the call returns only after the move is complete.
+        Reads the PTZ position before and after: a commanded axis whose
+        position did not change is at its physical limit (see the module
+        constants for why the delta is the only reliable signal on Tapo
+        hardware).
         """
+
+        watched = [
+            axis
+            for axis, velocity in (("pan", pan), ("tilt", tilt))
+            if abs(velocity) * duration_ms >= _MIN_DETECTABLE_CMD
+        ]
+        before = await self.get_position() if watched else None
 
         await self.continuous_move(pan=pan, tilt=tilt, zoom=zoom)
         await asyncio.sleep(max(0, duration_ms) / 1000.0)
@@ -166,6 +228,17 @@ class OnvifCameraClient:
             await self.stop()
         except Exception as exc:
             logger.warning("ONVIF nudge stop failed: %s", exc)
+            return PtzNudgeOutcome()
+
+        if before is None:
+            return PtzNudgeOutcome()
+        await asyncio.sleep(_POSITION_SETTLE_S)
+        after = await self.get_position()
+        if after is None:
+            return PtzNudgeOutcome()
+        deltas = {"pan": after[0] - before[0], "tilt": after[1] - before[1]}
+        limited = tuple(axis for axis in watched if abs(deltas[axis]) < _LIMIT_EPSILON)
+        return PtzNudgeOutcome(limited_axes=limited, detected=True)
 
     # -- Presets ----------------------------------------------------------
 
@@ -219,4 +292,4 @@ class OnvifCameraClient:
         await self._ptz.RemovePreset(request)
 
 
-__all__ = ["OnvifCameraClient", "OnvifError"]
+__all__ = ["OnvifCameraClient", "OnvifError", "PtzNudgeOutcome"]

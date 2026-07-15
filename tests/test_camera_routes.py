@@ -59,6 +59,42 @@ def test_ptz_nudge(client: TestClient) -> None:
     assert r.json()["ok"] is True
 
 
+def test_ptz_nudge_at_limit_soft_fails(client: TestClient, stub_registry) -> None:
+    """A nudge that hits the physical pan/tilt limit returns 200 with
+    ok:false so the dashboard can surface it — not an HTTP error."""
+
+    from kasa_tapo_services.tapo.onvif_client import PtzNudgeOutcome
+
+    cam = stub_registry.camera("cam_lab499_west")
+    cam.onvif.nudge = AsyncMock(
+        return_value=PtzNudgeOutcome(limited_axes=("pan",), detected=True)
+    )
+    r = client.post(
+        "/cameras/cam_lab499_west/control/ptz",
+        json={"direction": "left", "speed": 0.5, "duration_ms": 200},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is False
+    assert body["message"] == "pan limit reached"
+
+
+def test_ptz_nudge_undetected_outcome_is_ok(client: TestClient, stub_registry) -> None:
+    """When limit detection could not run (no position support), the nudge
+    acks ok:true exactly as before."""
+
+    from kasa_tapo_services.tapo.onvif_client import PtzNudgeOutcome
+
+    cam = stub_registry.camera("cam_lab499_west")
+    cam.onvif.nudge = AsyncMock(return_value=PtzNudgeOutcome())
+    r = client.post(
+        "/cameras/cam_lab499_west/control/ptz",
+        json={"direction": "up", "speed": 0.5, "duration_ms": 200},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+
+
 def test_ptz_continuous(client: TestClient) -> None:
     r = client.post(
         "/cameras/cam_lab499_west/control/ptz",
