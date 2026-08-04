@@ -21,11 +21,11 @@ This package exists for two reasons:
 
 | Kind          | Models               | Backend                          | Control surface                    |
 |---------------|----------------------|----------------------------------|------------------------------------|
-| `camera`      | Tapo C200/C210/C220, C225, **C245D** (dual lens)  | `pytapo` (privacy/day-night) + ONVIF (PTZ + presets) | nudge/continuous PTZ, save/goto/delete preset, privacy/streaming |
+| `camera`      | Tapo C200/C210/C220, C225, **C245D** (dual lens), **C100** (fixed, no PTZ)  | `pytapo` (privacy/day-night) + ONVIF (PTZ + presets) | nudge/continuous PTZ, save/goto/delete preset, privacy/streaming |
 | `smart_plug`  | Kasa **HS103** (and HS100/HS105/HS110) | `python-kasa` | `on` / `off` / `toggle` |
 | `power_strip` | Kasa **HS300** (6 outlets, KP303 too)  | `python-kasa` | `on` / `off` / `toggle` (whole strip or per-outlet via `outlet:`) |
 
-Cameras emit a `details.lenses[]` block (one entry per physical lens) and a `details.presets[]` list. Power strips emit one `ComponentStatus` per outlet under `components` (`outlet_0`, `outlet_1`, …) so the dashboard can render the outlet grid generically.
+Cameras emit a `details.lenses[]` block (one entry per physical lens) and a `details.presets[]` list. **Fixed cameras** (C100/C110/…) answer ONVIF device + media calls but expose no PTZ service; they are fully reachable and streamable, and the gateway simply omits `ptz` / `preset/*` from `allowed_actions` and reports no presets. Power strips emit one `ComponentStatus` per outlet under `components` (`outlet_0`, `outlet_1`, …) so the dashboard can render the outlet grid generically.
 
 ## Install
 

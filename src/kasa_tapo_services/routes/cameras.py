@@ -740,7 +740,9 @@ async def _build_status(bundle: CameraClients, registry: DeviceRegistry) -> Equi
     ).model_dump(mode="json")
 
     allowed: list[str] = []
-    if onvif_reachable:
+    # Fixed cameras (Tapo C100/C110/...) are ONVIF-reachable but expose no
+    # PTZ service; don't advertise actions the hardware cannot perform.
+    if onvif_reachable and bundle.onvif is not None and bundle.onvif.has_ptz:
         allowed += ["ptz", "preset/save", "preset/goto", "preset/{id}"]
     if tapo_reachable:
         allowed += ["privacy"]

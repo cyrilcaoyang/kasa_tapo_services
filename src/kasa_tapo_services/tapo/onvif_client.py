@@ -83,8 +83,18 @@ class OnvifCameraClient:
         self._media_token: str | None = None
         self._lock = asyncio.Lock()
 
+    @property
+    def has_ptz(self) -> bool:
+        """True once connected to a camera that exposes a PTZ service.
+
+        Fixed cameras (e.g. Tapo C100) answer ONVIF device/media calls but
+        have no PTZ service; they are still "reachable".
+        """
+
+        return self._ptz is not None
+
     async def _connect(self) -> None:
-        if self._cam is not None and self._ptz is not None:
+        if self._cam is not None:
             return
         async with self._lock:
             if self._cam is not None:
@@ -113,7 +123,22 @@ class OnvifCameraClient:
                 wsdl_dir=wsdl_dir,
             )
             await cam.update_xaddrs()
-            ptz = await cam.create_ptz_service()
+            # Fixed cameras (Tapo C100/C110/...) have no PTZ service; the
+            # library refuses create_ptz_service with "Device doesn`t
+            # support service: ptz". Treat that as "reachable, no PTZ"
+            # instead of failing the whole connection. Any other PTZ
+            # bring-up failure still propagates.
+            try:
+                ptz = await cam.create_ptz_service()
+            except Exception as exc:
+                if "support service" not in str(exc).lower():
+                    raise
+                logger.info(
+                    "ONVIF %s:%s has no PTZ service (fixed camera); PTZ disabled",
+                    self._host,
+                    self._port,
+                )
+                ptz = None
             media = await cam.create_media_service()
             profiles = await media.GetProfiles()
             if not profiles:
@@ -155,7 +180,8 @@ class OnvifCameraClient:
         """
 
         await self._connect()
-        assert self._ptz is not None and self._media_token is not None
+        self._require_ptz()
+        assert self._media_token is not None
 
         request = self._ptz.create_type("ContinuousMove")
         request.ProfileToken = self._media_token
@@ -171,9 +197,16 @@ class OnvifCameraClient:
                 lambda: asyncio.create_task(self._safe_stop()),
             )
 
+    def _require_ptz(self) -> None:
+        if self._ptz is None:
+            raise OnvifError(
+                f"camera {self._host} has no PTZ service (fixed lens)"
+            )
+
     async def stop(self) -> None:
         await self._connect()
-        assert self._ptz is not None and self._media_token is not None
+        self._require_ptz()
+        assert self._media_token is not None
         request = self._ptz.create_type("Stop")
         request.ProfileToken = self._media_token
         request.PanTilt = True
@@ -195,7 +228,8 @@ class OnvifCameraClient:
 
         try:
             await self._connect()
-            assert self._ptz is not None and self._media_token is not None
+            self._require_ptz()
+            assert self._media_token is not None
             status = await self._ptz.GetStatus({"ProfileToken": self._media_token})
             pan_tilt = getattr(getattr(status, "Position", None), "PanTilt", None)
             if pan_tilt is None:
@@ -244,7 +278,9 @@ class OnvifCameraClient:
 
     async def list_presets(self) -> list[PresetEntry]:
         await self._connect()
-        assert self._ptz is not None and self._media_token is not None
+        if self._ptz is None:
+            return []  # fixed camera - no PTZ, no presets
+        assert self._media_token is not None
         try:
             raw = await self._ptz.GetPresets({"ProfileToken": self._media_token})
         except Exception as exc:
@@ -262,7 +298,8 @@ class OnvifCameraClient:
 
     async def save_preset(self, name: str) -> str:
         await self._connect()
-        assert self._ptz is not None and self._media_token is not None
+        self._require_ptz()
+        assert self._media_token is not None
         request = self._ptz.create_type("SetPreset")
         request.ProfileToken = self._media_token
         request.PresetName = name
@@ -277,7 +314,8 @@ class OnvifCameraClient:
 
     async def goto_preset(self, preset_id: str) -> None:
         await self._connect()
-        assert self._ptz is not None and self._media_token is not None
+        self._require_ptz()
+        assert self._media_token is not None
         request = self._ptz.create_type("GotoPreset")
         request.ProfileToken = self._media_token
         request.PresetToken = preset_id
@@ -285,7 +323,8 @@ class OnvifCameraClient:
 
     async def delete_preset(self, preset_id: str) -> None:
         await self._connect()
-        assert self._ptz is not None and self._media_token is not None
+        self._require_ptz()
+        assert self._media_token is not None
         request = self._ptz.create_type("RemovePreset")
         request.ProfileToken = self._media_token
         request.PresetToken = preset_id

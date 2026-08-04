@@ -32,6 +32,10 @@ def _stub_camera_clients(cfg) -> CameraClients:
 
     onvif = AsyncMock()
     onvif.is_reachable = AsyncMock(return_value=True)
+    # Plain attribute, not a coroutine: the stub models a PTZ-capable
+    # camera. Tests covering fixed cameras set it False (see
+    # test_onvif_fixed_camera.py).
+    onvif.has_ptz = True
     onvif.continuous_move = AsyncMock()
     onvif.stop = AsyncMock()
     onvif.nudge = AsyncMock(return_value=PtzNudgeOutcome(detected=True))
