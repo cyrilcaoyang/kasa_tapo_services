@@ -183,12 +183,20 @@ class DeviceCredentials(BaseModel):
     + pytapo calls) and ``onvif_user``/``onvif_pass`` (ONVIF Account, used
     for PTZ) may be set. If the ONVIF pair is missing the gateway falls
     back to the Camera Account.
+
+    ``cloud_password`` is the TP-Link *cloud account* password. Newer Tapo
+    firmware rejects the Camera Account pair on the control API (login as
+    local user ``admin`` with the cloud password is the only accepted
+    form), while RTSP and ONVIF continue to accept the Camera Account.
+    When set, pytapo control uses ``admin``/``cloud_password``; the Camera
+    Account pair stays in use for RTSP and ONVIF.
     """
 
     user: str | None = None
     password: str | None = None
     onvif_user: str | None = None
     onvif_password: str | None = None
+    cloud_password: str | None = None
 
     @property
     def has_basic(self) -> bool:
@@ -211,6 +219,9 @@ def device_credentials(device_id: str) -> DeviceCredentials:
     * ``<ID>_USER`` / ``<ID>_PASS`` - Tapo Camera Account, RTSP, Kasa cloud
     * ``<ID>_ONVIF_USER`` / ``<ID>_ONVIF_PASS`` - separate ONVIF account
       (optional - falls back to the basic pair).
+    * ``<ID>_CLOUD_PASS`` - TP-Link cloud account password (optional;
+      required for pytapo control on newer Tapo firmware, which rejects
+      the Camera Account pair on the control API).
     """
 
     key = device_id.upper()
@@ -219,6 +230,7 @@ def device_credentials(device_id: str) -> DeviceCredentials:
         password=os.environ.get(f"{key}_PASS"),
         onvif_user=os.environ.get(f"{key}_ONVIF_USER"),
         onvif_password=os.environ.get(f"{key}_ONVIF_PASS"),
+        cloud_password=os.environ.get(f"{key}_CLOUD_PASS"),
     )
 
 

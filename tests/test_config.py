@@ -79,6 +79,75 @@ def test_device_credentials_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert creds.effective_onvif_user == "onvif_user"
     assert creds.effective_onvif_password == "secret"
     assert creds.has_basic is True
+    # Cloud password is optional and defaults to unset.
+    assert creds.cloud_password is None
+
+
+def test_device_credentials_reads_cloud_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CAM_TEST_USER", "alice")
+    monkeypatch.setenv("CAM_TEST_PASS", "secret")
+    monkeypatch.setenv("CAM_TEST_CLOUD_PASS", "cloud-secret")
+
+    creds = device_credentials("cam_test")
+    assert creds.cloud_password == "cloud-secret"
+    # The cloud password never leaks into the RTSP/ONVIF pairs.
+    assert creds.password == "secret"
+    assert creds.effective_onvif_password == "secret"
+
+
+def test_registry_uses_admin_with_cloud_password(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Newer Tapo firmware only accepts admin + cloud password on the
+    control API; with ``<ID>_CLOUD_PASS`` set the registry must build the
+    pytapo client with that pair while ONVIF keeps the Camera Account."""
+
+    from kasa_tapo_services.routes.registry import DeviceRegistry
+
+    monkeypatch.setenv("CAM_CLOUD_USER", "alice")
+    monkeypatch.setenv("CAM_CLOUD_PASS", "secret")
+    monkeypatch.setenv("CAM_CLOUD_CLOUD_PASS", "cloud-secret")
+    cfg = _validate(
+        [
+            {
+                "id": "cam_cloud",
+                "name": "Cloud-auth Camera",
+                "kind": "camera",
+                "host": "192.0.2.1",
+                "lenses": [{"id": "main", "label": "Main", "rtsp_path": "stream1"}],
+            }
+        ]
+    )
+
+    cam = DeviceRegistry(cfg).camera("cam_cloud")
+    assert cam.tapo is not None
+    assert cam.tapo._user == "admin"
+    assert cam.tapo._password == "cloud-secret"
+    assert cam.onvif is not None
+    assert cam.onvif._user == "alice"
+    assert cam.onvif._password == "secret"
+
+
+def test_registry_falls_back_to_camera_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kasa_tapo_services.routes.registry import DeviceRegistry
+
+    monkeypatch.setenv("CAM_BASIC_USER", "alice")
+    monkeypatch.setenv("CAM_BASIC_PASS", "secret")
+    monkeypatch.delenv("CAM_BASIC_CLOUD_PASS", raising=False)
+    cfg = _validate(
+        [
+            {
+                "id": "cam_basic",
+                "name": "Basic-auth Camera",
+                "kind": "camera",
+                "host": "192.0.2.2",
+                "lenses": [{"id": "main", "label": "Main", "rtsp_path": "stream1"}],
+            }
+        ]
+    )
+
+    cam = DeviceRegistry(cfg).camera("cam_basic")
+    assert cam.tapo is not None
+    assert cam.tapo._user == "alice"
+    assert cam.tapo._password == "secret"
 
 
 def test_example_yaml_round_trip() -> None:

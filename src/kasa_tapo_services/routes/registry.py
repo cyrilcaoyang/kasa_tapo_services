@@ -105,7 +105,12 @@ class DeviceRegistry:
         creds = device_credentials(cfg.id)
         tapo: TapoCameraClient | None = None
         onvif: OnvifCameraClient | None = None
-        if creds.has_basic:
+        if creds.cloud_password:
+            # Newer Tapo firmware only accepts local user "admin" + the
+            # TP-Link cloud password on the control API; the Camera
+            # Account pair below stays in use for RTSP + ONVIF.
+            tapo = TapoCameraClient(cfg.host, "admin", creds.cloud_password)
+        elif creds.has_basic:
             tapo = TapoCameraClient(cfg.host, creds.user, creds.password)
         else:
             logger.warning("camera %s: missing %s_USER/_PASS env, pytapo disabled", cfg.id, cfg.id.upper())
