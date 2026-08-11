@@ -45,7 +45,7 @@ class PlugState:
 
 
 class KasaPlugClient:
-    """One Kasa device, identified by its lab-LAN IP.
+    """One Kasa device, identified by its address on the lab Wi-Fi.
 
     Connect/refresh is lazy. python-kasa's ``Device`` keeps an internal
     socket which can hiccup; on any error we drop the cached device and

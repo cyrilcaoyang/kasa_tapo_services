@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kasa-tapo-services"
 version = "0.1.0"
-description = "STATUS_SPEC v1.0 gateway service for TP-Link Kasa smart plugs (HS103, HS300) and Tapo cameras (C200/C210/C220/C225/C245D). Bridges the lab LAN devices to the AC Organic Self-driving Lab dashboard."
+description = "STATUS_SPEC v1.0 gateway service for TP-Link Kasa smart plugs (HS103, HS300) and Tapo cameras (C100/C200/C210/C220/C225/C245D). Bridges the lab Wi-Fi devices to the AC Organic Self-driving Lab dashboard."
 requires-python = ">=3.10"
 readme = "README.md"
 authors = [{ name = "AC Organic Lab" }]

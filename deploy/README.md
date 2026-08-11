@@ -215,22 +215,26 @@ Append the contents of `Caddyfile.snippet` to the existing dashboard Caddy block
 1. Open the Tapo phone app, select the camera, then **Settings → Advanced Settings**.
 2. Under **Camera Account**, create or note down a username + password (this is what go2rtc uses for RTSP and what pytapo uses for privacy/day-night).
 3. Under **ONVIF**, enable ONVIF and create an ONVIF-only username + password (or reuse the Camera Account one).
-4. Find the camera's lab-LAN IP from the Tapo app or from the lab DHCP server.
+4. Find the camera's **Wi-Fi** IP (`172.31.x.x`) from the Tapo app or the lab DHCP server. This is the only network the gateway can reach it on — not the wired network, not the tailnet.
 5. Verify the RTSP paths from the dashboard host:
    ```bash
-   ffprobe -v error rtsp://USER:PASS@IP:554/stream1
-   ffprobe -v error rtsp://USER:PASS@IP:554/stream2   # or /stream3 on some dual-lens models
+   ffprobe -v error rtsp://USER:PASS@IP:554/stream1   # wide / only lens
+   ffprobe -v error rtsp://USER:PASS@IP:554/stream6   # tele, on dual-lens C245D
    ```
+   Dual-lens Tapo models put the second lens on `/stream6`, not `/stream2`
+   — `/stream2` is the SD copy of the wide stream. If `/stream2` and
+   `/stream6` look identical, the camera is single-lens (e.g. C100): wire
+   only `/stream1`.
 6. Add an entry to `devices.yaml` in the repo checkout (see `../devices.yaml.example` for the shape).
 7. Add `<DEVICE_ID_UPPERCASE>_USER`, `<DEVICE_ID_UPPERCASE>_PASS`, and (if used) the `_ONVIF_*` pair to `/etc/kasa-tapo-services/.env`.
 8. `sudo systemctl restart kasa-tapo-services.service ac-go2rtc.service`.
-9. In the dashboard repo, add a matching `equipment.yaml` entry pointing `base_url: http://127.0.0.1:8002` and `status_path: /cameras/<id>/status`, then restart `ac-dashboard-api.service`.
+9. In the dashboard repo, add a matching `equipment.yaml` entry pointing `base_url: http://127.0.0.1:8002` and `status_path: /cameras/<id>/status`, add the id to the right section in `platforms.yaml`, then restart `ac-organic-lab-api.service`.
 
 ## Adding a Kasa plug
 
 HS103 (single plug) and HS300 (6-outlet strip) ship in legacy Kasa protocol mode by default - no credentials are needed. If you've migrated the plug to the TP-Link cloud (KLAP protocol), add the cloud account email/password as `<DEVICE_ID_UPPERCASE>_USER` / `_PASS` in `.env`.
 
-1. Discover the plug's IP (`kasa discover` from the gateway host, or check the Kasa app).
+1. Discover the plug's Wi-Fi IP (`kasa discover` from the gateway host — discovery is a broadcast, so it only works from a host on the same wireless network — or check the Kasa app).
 2. Add an entry to `devices.yaml` with `kind: smart_plug` (HS103) or `kind: power_strip` + `outlets:` (HS300).
 3. Restart the gateway.
 4. Add the matching dashboard `equipment.yaml` entry with `status_path: /plugs/<id>/status`.

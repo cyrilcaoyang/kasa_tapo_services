@@ -1,21 +1,51 @@
 # kasa-tapo-services
 
-A small FastAPI gateway that publishes lab LAN-only TP-Link **Kasa smart plugs** (HS103, HS300) and **Tapo cameras** (C200/C210/C220/C225/C245D) as STATUS_SPEC v1.0-conformant equipment to the [AC Organic Self-driving Lab](https://github.com/your-org/ac-organic-lab) dashboard.
+A small FastAPI gateway that publishes the lab's Wi-Fi-only TP-Link **Kasa smart plugs** (HS103, HS300) and **Tapo cameras** (C100/C200/C210/C220/C225/C245D) as STATUS_SPEC-conformant equipment to the [AC Organic Self-driving Lab](https://github.com/AccelerationConsortium/ac-organic-lab) dashboard.
 
 This package exists for two reasons:
 
 1. **Tapo cameras and Kasa plugs do not speak HTTP**. They speak proprietary protocols (Kasa `XOR`/`KLAP` over TCP, Tapo HTTPS/RTSP/ONVIF). The gateway translates them to the dashboard's normalized HTTP envelope.
-2. **They live on the lab LAN, not the tailnet.** The gateway runs on the dashboard host (which has both interfaces) and re-exposes the devices to the rest of the lab through the same `equipment.yaml` registry as every other piece of equipment.
+2. **They are only reachable over the lab Wi-Fi**, which is neither the tailnet nor the wired network the rest of the lab's device PCs use. The gateway runs on the dashboard host — the one machine attached to all three — and re-exposes the devices through the same `equipment.yaml` registry as every other piece of equipment.
+
+### Which network, exactly
+
+This is the detail that trips people up, so it is worth stating plainly: **these devices are on Wi-Fi (WLAN), not on the wired LAN.** The dashboard host is multi-homed, and only one of its three interfaces can see a camera:
+
+| Interface | Network | What lives there |
+|---|---|---|
+| `wlp9s0` (**Wi-Fi**) | `172.31.0.0/16` | **Every camera and plug in this repo.** The gateway's only path to them. |
+| `eno1` (wired) | `10.21.10.0/16` | Institutional wired network. **No route to any camera.** |
+| `tailscale0` | `100.64.254.6` | How the dashboard and the rest of the lab reach *this gateway*. |
+
+Consequences worth internalizing:
+
+* A camera's `host:` in `devices.yaml` is always a **`172.31.x.x` Wi-Fi address**. Putting a wired or tailnet address there cannot work.
+* Wi-Fi is the weakest link in the chain. A camera reporting `unknown` / "unreachable" is far more often a Wi-Fi association or DHCP-lease problem than a dead camera — check `ping` from the gateway host before touching the device.
+* The devices hold **DHCP leases**, so an address can move. If a previously-working camera goes unreachable, re-check its current address in the Tapo/Kasa app before assuming hardware failure.
 
 ```
-┌─────────── lab LAN ───────────┐    ┌──────── dashboard host ────────┐
-│                               │    │                                │
-│  Tapo C245D  (RTSP + ONVIF)   │◀───┤  go2rtc  :1984  (RTSP→MSE/WS)  │
-│  Tapo C210                    │◀───┤  kasa-tapo-services  :8002     │◀── tailnet
-│  Kasa HS103                   │◀───┤    cameras + plugs gateway     │
-│  Kasa HS300                   │◀───┤                                │
-└───────────────────────────────┘    └────────────────────────────────┘
+┌────────── lab Wi-Fi (wlp9s0, 172.31.0.0/16) ──────────┐   ┌────── dashboard host (gaia) ──────┐
+│                                                       │   │                                   │
+│  Tapo C245D  ×2   (dual lens, PTZ, RTSP + ONVIF)      │◀──┤  go2rtc  :1984   (RTSP→MSE/WebRTC)│
+│  Tapo C100   ×1   (fixed, no PTZ)                     │◀──┤  kasa-tapo-services  :8002        │◀── tailnet
+│  Kasa HS300  ×2   (6-outlet strips)                   │◀──┤    cameras + plugs gateway        │    (100.64.254.6)
+│                                                       │   │                                   │
+└───────────────────────────────────────────────────────┘   └───────────────────────────────────┘
 ```
+
+### Current fleet
+
+The five devices this gateway fronts today (see `devices.yaml`):
+
+| `id` | Model | Lenses / outlets | Notes |
+|---|---|---|---|
+| `cam_hte_tapo_c245` | Tapo C245D | `wide` → `stream1`, `tele` → `stream6` | PTZ on the tele lens only |
+| `cam_echem_tapo_c245` | Tapo C245D | `wide` → `stream1`, `tele` → `stream6` | Echem bench; same credentials as the HTE unit |
+| `cam_echem_tapo_c100` | Tapo C100 | `main` → `stream1` | **Fixed** — no PTZ service, no presets |
+| `plug_hte_strip_right` | Kasa HS300 | 6 outlets | Legacy XOR protocol, port 9999, no credentials |
+| `plug_hte_strip_left` | Kasa HS300 | 6 outlets | Legacy XOR protocol, port 9999, no credentials |
+
+> **PTZ on the C245D is tele-only.** The wide lens is fixed to the camera base; ONVIF PTZ moves only the telephoto lens. This is a property of the hardware, not a gateway limitation.
 
 ## Supported device kinds
 
@@ -42,7 +72,7 @@ ffmpeg -version | head -1
 
 ## Configure
 
-1. Copy `devices.yaml.example` to `devices.yaml` and fill in each device's lab-LAN IP, kind, and (for cameras) per-lens RTSP paths and ONVIF port.
+1. Copy `devices.yaml.example` to `devices.yaml` and fill in each device's **Wi-Fi address** (`172.31.x.x` — see [Which network, exactly](#which-network-exactly)), kind, and (for cameras) per-lens RTSP paths and ONVIF port.
 2. Copy `.env.example` to `.env` and fill in per-device credentials. Variable names follow the pattern `<DEVICE_ID_UPPERCASE>_USER` / `<DEVICE_ID_UPPERCASE>_PASS`.
 3. (Cameras only) On the camera, create a **Tapo Camera Account** (Tapo app → camera → Settings → Advanced → Camera Account) and an **ONVIF account** (Settings → Advanced → ONVIF). Use the same credentials for both unless you need them to differ.
 
@@ -54,8 +84,9 @@ Tapo dual-lens models (e.g. **C245D**) publish the two lenses on
 * wide-angle: `/stream1` (HD), `/stream2` (SD)
 * telephoto: `/stream6` (HD), `/stream7` (SD)
 
-Single-lens models (C200/C210/C220) only expose `/stream1` and
-`/stream2`. Confirm before deploying:
+Single-lens models (**C100**, C200/C210/C220) only expose `/stream1` (HD)
+and `/stream2` (SD) — wire just `/stream1` as the single lens. Confirm
+before deploying:
 
 ```bash
 ffprobe -v error -hide_banner rtsp://$USER:$PASS@$IP:554/stream1
@@ -94,7 +125,7 @@ browser at the right host by setting one env var in
 `/etc/kasa-tapo-services/.env`:
 
 ```
-GO2RTC_WEBRTC_HOST=gaia.tail6a1dd7.ts.net   # dashboard's MagicDNS name
+GO2RTC_WEBRTC_HOST=sdl2-server-gaia.tail6a1dd7.ts.net   # dashboard's MagicDNS name
 ```
 
 The bootstrap renders this into `webrtc.candidates`, so the browser
@@ -102,10 +133,9 @@ opens its TCP connection to `<host>:8555` directly (raw DTLS/SRTP — no
 HTTP, no Caddy passthrough). To disable WebRTC entirely and stay
 MSE-only, set `GO2RTC_WEBRTC_LISTEN=` (empty string).
 
-> The dashboard's `MsePlayer` is the consumer today. A `WebRtcPlayer`
-> swap lands in a follow-up PR on `ac-organic-lab/web/` — until then,
-> the renderer is forward-compatible and harmless: MSE keeps working
-> exactly as before.
+> Both consumers have shipped on the dashboard side. `web/`'s
+> `CameraPlayer` picks per browser: `WebRtcPlayer` where `MediaSource`
+> is unavailable (notably iPhone Safari), `MsePlayer` everywhere else.
 
 ## Wire into the dashboard
 
@@ -114,25 +144,42 @@ In `ac-organic-lab/equipment.yaml`:
 ```yaml
 - id: cam_hte_tapo_c245
   name: HTE Camera
-  platform: hte
   kind: camera
   adapter: http
   protocol: "1.0"
   base_url: http://127.0.0.1:8002
   status_path: /cameras/cam_hte_tapo_c245/status
   poll_timeout_seconds: 5.0     # ONVIF SOAP can take 1-2s on its own
-  tile: { w: 2, h: 3 }
+  tiles:
+    hte: { w: 2, h: 3 }         # keyed by the platforms.yaml section id
+  pills: {}
   camera:
-    host: 192.168.1.42
+    host: 172.31.60.16          # Wi-Fi address, not wired and not tailnet
     onvif_port: 2020
     lenses:
       - { id: wide, label: Wide, rtsp_path: stream1 }
       - { id: tele, label: Tele, rtsp_path: stream6 }   # /stream2 is SD-wide on dual-lens
 ```
 
-Restart `ac-dashboard-api.service` and the camera tile (with PTZ pad,
-preset selector, and snapshot/record buttons) should appear on the
-matching platform's panel and on `/platforms/{platform}`.
+Two registry-schema details that changed under us and are easy to get
+wrong (both are `equipment.yaml` **schema v2**):
+
+* There is **no `platform:` field**. Section membership is declared in
+  `platforms.yaml` instead — add the id to that section's `equipment:`
+  list, where its position sets the display order.
+* Tile sizing is `tiles: {<section_id>: {w, h}}`, **not** a bare `tile:`.
+  A missing section key defaults to `{w: 2, h: 1}`.
+
+Then restart the dashboard API — the unit is `ac-organic-lab-api.service`:
+
+```bash
+sudo systemctl restart ac-organic-lab-api.service
+```
+
+The camera tile (PTZ pad, preset selector, snapshot/record buttons)
+appears on `/platforms/{section}`; the Overview card shows a collapsed
+"Show stream" toggle rather than a live feed, so the landing page does
+not pull video for every visitor.
 
 ## REST surface
 
@@ -153,6 +200,8 @@ For each device the gateway publishes:
 | POST   | `/cameras/{id}/control/recording/start`               | `{lens?}`                             |
 | POST   | `/cameras/{id}/control/recording/stop`                | `{recording_id?}`                     |
 | POST   | `/cameras/{id}/control/recording/cancel`              | `{recording_id?}` (deletes partial)   |
+| POST   | `/cameras/{id}/control/rolling/start`                 | `{lens?, segment_duration_s?, max_segments?, include_audio?}` |
+| POST   | `/cameras/{id}/control/rolling/stop`                  | -                                     |
 | GET    | `/cameras/{id}/media`                                 | - (lists snapshots + recordings)      |
 | GET    | `/cameras/{id}/media/{snapshots\|recordings}/{lens}/{name}` | - (binary file download)        |
 | GET    | `/plugs/{id}/`                                        | -                                     |
@@ -189,7 +238,15 @@ the dashboard can render a live "Recording …" indicator without polling
 a separate endpoint. See `deploy/README.md` for the production filesystem
 layout and required `ReadWritePaths=` whitelist.
 
-Plus the gateway-level routes: `GET /` (service info), `GET /health`, `GET /devices` (enumerate all devices).
+Plus the gateway-level routes, which describe the **gateway process
+itself** rather than any one device:
+
+| Method | Path       | Body / purpose |
+|--------|------------|----------------|
+| GET    | `/`        | Service info (`ProbeResponse`) |
+| GET    | `/health`  | `{"status": "healthy"}` while the process is alive |
+| GET    | `/status`  | A full `EquipmentStatus` envelope for the gateway (`equipment_id: kasa_tapo_gateway`, `kind: other`), with `metrics.cameras` / `metrics.plugs` counting what it fronts. Registered in `equipment.yaml` as its own tile, so an operator can tell "the gateway is down" from "one camera is down". |
+| GET    | `/devices` | Enumerate every configured camera and plug |
 
 ## Tests
 
@@ -267,11 +324,12 @@ Beyond the baseline envelope:
 
 ### Reachability and `equipment_status` (unreachable backing hardware)
 
-This gateway fronts hardware (cameras, plugs) over the lab LAN. When the
-gateway process is healthy but **cannot reach the backing device** (LAN down,
-power off — e.g. `No route to host`, or a camera where neither ONVIF nor the
-Tapo API responds), `/status` still returns **HTTP 200** (the gateway itself is
-alive, per spec best-practice #2) and reports:
+This gateway fronts hardware (cameras, plugs) over the lab Wi-Fi. When the
+gateway process is healthy but **cannot reach the backing device** (Wi-Fi
+association lost, DHCP lease moved, power off — e.g. `No route to host`, or a
+camera where neither ONVIF nor the Tapo API responds), `/status` still returns
+**HTTP 200** (the gateway itself is alive, per spec best-practice #2) and
+reports:
 
 * `equipment_status: "unknown"` — the device's state *cannot be determined*.
   This is deliberately **not** `error`: nothing faulted, we simply can't reach
@@ -285,3 +343,49 @@ The dashboard renders a gateway-fronted device reporting `unknown` as
 means there is no transport-level `fetch_error` for the aggregator to key on.
 See the lab contract's [`STATUS_SPEC.md` §2.1 — `unknown` vs `error` vs
 "unreachable"](../ac-organic-lab/docs/STATUS_SPEC.md) for the normative rules.
+
+### Diagnosing an unreachable device
+
+Because the path to every device is Wi-Fi, work outward from the radio
+before suspecting the camera. Run all of this **on the gateway host** —
+reachability from anywhere else proves nothing:
+
+```bash
+# 1. Is the Wi-Fi interface up and on the device subnet?
+ip -br addr show wlp9s0            # expect 172.31.x.x/16, state UP
+
+# 2. Does the route to the device actually leave via Wi-Fi?
+ip route get 172.31.60.16          # expect "dev wlp9s0"
+
+# 3. Is the device answering at all?
+ping -c3 172.31.60.16
+
+# 4. Are its service ports open?  (cameras: 554 RTSP + 2020 ONVIF;
+#    Kasa plugs: 9999, legacy XOR protocol)
+nc -vz 172.31.60.16 554 2020
+
+# 5. Does RTSP actually negotiate with these credentials?
+ffprobe -v error -hide_banner rtsp://$USER:$PASS@172.31.60.16:554/stream1
+```
+
+Reading the result:
+
+| Where it fails | Most likely cause |
+|---|---|
+| Step 1 or 2 | Gateway host's Wi-Fi dropped, or the route is going out the wired interface. Nothing device-side to fix. |
+| Step 3 | Device is off, or its DHCP lease moved. Re-check the address in the Tapo/Kasa app and update `devices.yaml`. |
+| Step 4 (ONVIF only) | ONVIF disabled or wrong port — Tapo app → Advanced → ONVIF, default 2020. Tile goes `degraded`, not unreachable. |
+| Step 5 | Credentials. `<ID>_USER`/`<ID>_PASS` must be the **Camera Account**, which is distinct from the ONVIF account and from your TP-Link cloud login. |
+
+Two failure modes that look like a dead device but are not:
+
+* **`stream_connected: false` on every lens is normal when nobody is
+  watching.** go2rtc connects to RTSP on demand, so an idle camera shows
+  no producer. Only worry if it stays false while a stream is open.
+* **`tapo_reachable: false` while `onvif_reachable: true`** costs you the
+  privacy and day/night toggles but nothing else — health needs only
+  ONVIF and go2rtc, so the tile stays `ready`. Repeated failed pytapo
+  logins trigger a device-side lockout (`Temporary Suspension: Try again
+  in N seconds`) that the poll loop *keeps renewing*, so it will not
+  clear on its own: fix the Camera Account credentials, then restart the
+  gateway to stop the retry loop feeding it.

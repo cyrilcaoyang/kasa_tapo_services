@@ -9,7 +9,7 @@ How it works
 ============
 
 The camera itself speaks proprietary protocols (Tapo HTTPS, RTSP, ONVIF) and
-lives on the isolated lab LAN. It is fronted by the ``kasa-tapo-services``
+lives on the isolated lab Wi-Fi network. It is fronted by the ``kasa-tapo-services``
 gateway, which translates those protocols into a normalized HTTP surface
 (``/cameras/{id}/control/ptz`` etc.). Critically, that gateway is bound to
 ``127.0.0.1:8002`` on the dashboard server, so it is NOT reachable from your
@@ -39,7 +39,7 @@ The full request path for, e.g., ``ptz left``::
     kasa-tapo-services gateway  :8002             (loopback on dashboard host)
         |  ONVIF ContinuousMove / Tapo API call
         v
-    Tapo camera                                   (lab LAN)
+    Tapo camera                                   (lab Wi-Fi)
 
 Reads work the same way but in the GET direction:
 

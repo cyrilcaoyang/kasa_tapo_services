@@ -13,9 +13,17 @@
 #   status_path: /cameras/<id>/status   (for cameras)
 #                /plugs/<id>/status     (for plugs)
 #
-# Hostnames here MUST be the device's lab-LAN address (typically a 192.168.x
-# DHCP lease) - NOT the dashboard host's tailnet IP. Cameras and Kasa plugs
-# expose RTSP and the proprietary discover protocol on the lab LAN only.
+# Hostnames here MUST be the device's address on the lab **Wi-Fi** network
+# (172.31.x.x DHCP lease in this lab) - NOT the dashboard host's tailnet IP,
+# and NOT an address on the wired network. Cameras and Kasa plugs expose RTSP,
+# ONVIF, and the proprietary Kasa protocol over Wi-Fi only; the gateway host
+# is multi-homed and reaches them exclusively through its wireless interface.
+# Verify with `ip route get <host>` on the gateway host - it must name the
+# wireless device (wlp9s0 here), not the wired one.
+#
+# These are DHCP leases, so an address can move. If a device that used to work
+# goes unreachable, re-check its current address in the Tapo / Kasa app before
+# assuming the hardware failed.
 #
 # Real credentials live in `.env` (gitignored) using the variable name
 # convention documented in `.env.example`.
@@ -25,7 +33,7 @@ devices:
   - id: cam_lab499_west
     name: Lab 499 (West) Camera
     kind: camera
-    host: 192.168.1.42                  # <-- replace with real LAN IP
+    host: 172.31.60.42                  # <-- replace with the real Wi-Fi IP
     onvif_port: 2020                    # default for Tapo C-series
     rtsp_port: 554
     # One entry per physical lens. The C245D has wide + tele; older Tapo
@@ -35,7 +43,8 @@ devices:
     # at *non-adjacent* RTSP paths:
     #   wide-angle: /stream1 (HD)  /stream2 (SD)
     #   telephoto:  /stream6 (HD)  /stream7 (SD)
-    # Single-lens models (C200/C210/C220) only expose /stream1 and /stream2.
+    # Single-lens models (C100, C200/C210/C220) only expose /stream1 and
+    # /stream2 - wire just /stream1 as the single lens.
     # Verify with `ffprobe rtsp://user:pass@host:554/stream1`.
     lenses:
       - { id: wide, label: Wide, rtsp_path: stream1 }
@@ -50,11 +59,14 @@ devices:
     #   snapshots_dir: ~/kasa-tapo-media/snapshots/cam_lab499_west
     #   recordings_dir: /mnt/lab-storage/video/cam_lab499_west
 
-  # --- Single Tapo C210 example (no second lens) ---------------------
+  # --- Fixed single-lens camera, e.g. Tapo C100 / C110 ---------------
+  # A fixed camera has no ONVIF PTZ service. Nothing extra to declare: the
+  # gateway detects it, reports no presets, and omits ptz / preset/* from
+  # allowed_actions rather than advertising an action the hardware refuses.
   # - id: cam_storage
   #   name: Storage Camera
   #   kind: camera
-  #   host: 192.168.1.43
+  #   host: 172.31.60.43
   #   onvif_port: 2020
   #   lenses:
   #     - { id: main, label: Main, rtsp_path: stream1 }
@@ -63,7 +75,7 @@ devices:
   # - id: plug_hotplate_strip
   #   name: HTE Bench Hotplate Strip
   #   kind: power_strip
-  #   host: 192.168.1.51
+  #   host: 172.31.60.51
   #   outlets:
   #     - { index: 0, label: Hotplate A }
   #     - { index: 1, label: Hotplate B }
@@ -76,4 +88,4 @@ devices:
   # - id: plug_balance_lamp
   #   name: Balance Cabinet Lamp
   #   kind: smart_plug
-  #   host: 192.168.1.52
+  #   host: 172.31.60.52
