@@ -15,6 +15,7 @@ import pytest
 
 from kasa_tapo_services.config import (
     DeviceConfig,
+    DeviceCredentials,
     LensConfig,
     MediaConfig,
 )
@@ -111,6 +112,31 @@ def test_redact_url_hides_credentials() -> None:
 def test_redact_url_passes_through_when_no_credentials() -> None:
     url = "rtsp://192.168.1.1:554/stream1"
     assert media_mod._redact_url(url) == url
+
+
+def test_rtsp_url_percent_encodes_credentials() -> None:
+    """Tapo accounts are emails and passwords carry URL-special bytes.
+
+    Inlined raw, ffmpeg parsed userinfo up to the first ``@`` and cut the
+    URL at ``#``, failing with ``Port missing in uri``.
+    """
+
+    creds = DeviceCredentials(user="alice@example.com", password="Qk#1n%4t/mBj:x")
+    url = media_mod._rtsp_url(_camera(), "stream1", creds)
+
+    assert url == (
+        "rtsp://alice%40example.com:Qk%231n%254t%2FmBj%3Ax"
+        "@192.168.1.1:554/stream1"
+    )
+    # Exactly one unescaped '@' — the userinfo/host separator.
+    assert url.count("@") == 1
+    assert "#" not in url
+    assert media_mod._redact_url(url) == "rtsp://***:***@192.168.1.1:554/stream1"
+
+
+def test_rtsp_url_requires_credentials() -> None:
+    with pytest.raises(RuntimeError, match="no credentials in env"):
+        media_mod._rtsp_url(_camera(), "stream1", DeviceCredentials())
 
 
 # ---------------------------------------------------------------------

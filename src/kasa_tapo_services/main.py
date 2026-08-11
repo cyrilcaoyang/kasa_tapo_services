@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -19,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
+from .models import EquipmentStatus, MetricValue
 from .routes import build_camera_router, build_plug_router
 from .routes.registry import DeviceRegistry, build_registry_from_disk
 
@@ -26,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def _cors_origins() -> list[str]:
-    raw = os.environ.get("KASA_TAPO_CORS_ORIGINS", "http://localhost:3000")
+    raw = os.environ.get("KASA_TAPO_CORS_ORIGINS", "http://100.64.254.6:8000,http://sdl2-server-gaia.tail6a1dd7.ts.net:8000")
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
@@ -108,6 +110,35 @@ async def root() -> dict:
 @app.get("/health", tags=["meta"])
 async def health() -> dict:
     return {"status": "healthy"}
+
+
+@app.get("/status", tags=["meta"], response_model=EquipmentStatus)
+async def gateway_status() -> EquipmentStatus:
+    """Service-level STATUS_SPEC v1.0 envelope for the gateway itself.
+
+    Registered on the dashboard as a *web-service* row (like ``pypoe_web``),
+    distinct from the per-device ``/cameras/{id}/status`` / ``/plugs/{id}/status``
+    envelopes the aggregator polls for the camera and plug tiles. If this
+    process answers at all it is ``ready`` — per-device reachability is the
+    per-device envelopes' story, not this one's.
+    """
+
+    registry: DeviceRegistry = app.state.registry
+    now = datetime.now(timezone.utc)
+    return EquipmentStatus(
+        equipment_id="kasa_tapo_gateway",
+        equipment_name="Camera & Plug Gateway",
+        equipment_kind="other",
+        equipment_version=__version__,
+        host=socket.gethostname(),
+        equipment_status="ready",
+        device_time=now,
+        uptime_seconds=(now - app.state.boot_time).total_seconds(),
+        metrics={
+            "cameras": MetricValue(value=len(registry.list_cameras()), unit="count"),
+            "plugs": MetricValue(value=len(registry.list_plugs()), unit="count"),
+        },
+    )
 
 
 @app.get("/devices", tags=["meta"])

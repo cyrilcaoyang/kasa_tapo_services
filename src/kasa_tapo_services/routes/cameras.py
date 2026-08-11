@@ -38,6 +38,7 @@ from kasa_tapo_services.models import (
     StreamingRequest,
 )
 from kasa_tapo_services.tapo.bootstrap_go2rtc import _stream_name
+from kasa_tapo_services.tapo.onvif_client import PtzNudgeOutcome
 from kasa_tapo_services.tapo.media import (
     RecordingHandle,
     list_camera_media,
@@ -148,12 +149,18 @@ def build_camera_router() -> APIRouter:
                 if body.direction == "stop":
                     await bundle.onvif.stop()
                     return ControlAck(message="stopped")
-                await bundle.onvif.nudge(
+                outcome = await bundle.onvif.nudge(
                     pan=pan * body.speed,
                     tilt=tilt * body.speed,
                     zoom=0.0,
                     duration_ms=body.duration_ms,
                 )
+                # Soft-fail (200 + ok:false): the head is at a physical
+                # pan/tilt limit. Not an HTTP error — the ONVIF call itself
+                # succeeded; the hardware just has nowhere left to go.
+                if isinstance(outcome, PtzNudgeOutcome) and outcome.limit_hit:
+                    axes = " and ".join(outcome.limited_axes)
+                    return ControlAck(ok=False, message=f"{axes} limit reached")
                 return ControlAck(message=f"nudged {body.direction}")
             else:
                 if body.pan == body.tilt == body.zoom == 0.0:
@@ -733,7 +740,9 @@ async def _build_status(bundle: CameraClients, registry: DeviceRegistry) -> Equi
     ).model_dump(mode="json")
 
     allowed: list[str] = []
-    if onvif_reachable:
+    # Fixed cameras (Tapo C100/C110/...) are ONVIF-reachable but expose no
+    # PTZ service; don't advertise actions the hardware cannot perform.
+    if onvif_reachable and bundle.onvif is not None and bundle.onvif.has_ptz:
         allowed += ["ptz", "preset/save", "preset/goto", "preset/{id}"]
     if tapo_reachable:
         allowed += ["privacy"]

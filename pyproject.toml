@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kasa-tapo-services"
 version = "0.1.0"
-description = "STATUS_SPEC v1.0 gateway service for TP-Link Kasa smart plugs (HS103, HS300) and Tapo cameras (C200/C210/C220/C225/C245D). Bridges the lab LAN devices to the AC Organic Self-driving Lab dashboard."
+description = "STATUS_SPEC v1.0 gateway service for TP-Link Kasa smart plugs (HS103, HS300) and Tapo cameras (C100/C200/C210/C220/C225/C245D). Bridges the lab Wi-Fi devices to the AC Organic Self-driving Lab dashboard."
 requires-python = ">=3.10"
 readme = "README.md"
 authors = [{ name = "AC Organic Lab" }]
@@ -14,6 +14,10 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "pydantic>=2.7",
+    # The shared STATUS_SPEC contract types (ac-organic-lab ARCHITECTURE.md
+    # LG5). Replaces the copy this repo used to vendor in models.py; pinned
+    # to a tag so the wire contract only moves when we bump it deliberately.
+    "sdl-lab-contract>=1.2.1",
     "pyyaml>=6.0",
     "httpx>=0.27",
     "python-dotenv>=1.0",
@@ -41,6 +45,9 @@ dev = [
 # CLI: render /etc/go2rtc/go2rtc.yaml from devices.yaml + .env. Run as a
 # systemd ExecStartPre on the dashboard host before go2rtc starts.
 kasa-tapo-bootstrap-go2rtc = "kasa_tapo_services.tapo.bootstrap_go2rtc:main"
+
+[tool.uv.sources]
+sdl-lab-contract = { git = "https://github.com/AccelerationConsortium/sdl-lab-contract", tag = "v1.2.1" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

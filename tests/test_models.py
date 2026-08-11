@@ -1,4 +1,9 @@
-"""Sanity tests for the vendored STATUS_SPEC envelope."""
+"""Sanity tests for the STATUS_SPEC envelope re-exported from sdl-lab-contract.
+
+``test_envelope_round_trip`` pins the version this gateway reports: it has a
+``/control/*`` surface but no claim protocol, so STATUS_SPEC §9 keeps it at
+v1.0 no matter which version of the contract package supplies the types.
+"""
 
 from __future__ import annotations
 

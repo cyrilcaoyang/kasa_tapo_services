@@ -9,7 +9,7 @@ How it works
 ============
 
 The camera itself speaks proprietary protocols (Tapo HTTPS, RTSP, ONVIF) and
-lives on the isolated lab LAN. It is fronted by the ``kasa-tapo-services``
+lives on the isolated lab Wi-Fi network. It is fronted by the ``kasa-tapo-services``
 gateway, which translates those protocols into a normalized HTTP surface
 (``/cameras/{id}/control/ptz`` etc.). Critically, that gateway is bound to
 ``127.0.0.1:8002`` on the dashboard server, so it is NOT reachable from your
@@ -25,9 +25,9 @@ uses; we hit the exact same endpoint::
 The full request path for, e.g., ``ptz left``::
 
     this script                                   (your laptop, on the Tailnet)
-        |  POST http://100.64.254.6:3000/api/equipment/cam_.../control/ptz
+        |  POST http://100.64.254.6:8000/api/equipment/cam_.../control/ptz
         v
-    Next.js web server  :3000                     (dashboard host)
+    Next.js web server  :8000                     (dashboard host)
         |  rewrites /api/* -> http://127.0.0.1:8001/api/*
         v
     FastAPI aggregator  :8001  (api/app/control.py)
@@ -39,7 +39,7 @@ The full request path for, e.g., ``ptz left``::
     kasa-tapo-services gateway  :8002             (loopback on dashboard host)
         |  ONVIF ContinuousMove / Tapo API call
         v
-    Tapo camera                                   (lab LAN)
+    Tapo camera                                   (lab Wi-Fi)
 
 Reads work the same way but in the GET direction:
 
@@ -81,9 +81,9 @@ Configuration (constants below, overridable via env)
 -----------------------------------------------------
 
 * ``KASA_TAPO_DASHBOARD_URL`` - dashboard base URL
-  (default ``http://100.64.254.6:3000``). This is the host you open in the
+  (default ``http://100.64.254.6:8000``). This is the host you open in the
   browser to view/control the camera - the dashboard Linux server's Tailnet
-  address, NOT your laptop. Port 3000 is the dashboard's Next.js server, which
+  address, NOT your laptop. Port 8000 is the dashboard's Next.js server, which
   proxies ``/api/*`` to the FastAPI aggregator on the same host. Plain HTTP
   over the Tailnet; no token needed (access is gated by Tailscale ACLs).
 * ``CAMERA_ID`` - default camera id; override per-invocation with ``--camera``.
@@ -113,7 +113,7 @@ Examples::
     python scripts/control_camera.py snapshot --lens wide
 
     # point at a different dashboard host / camera:
-    KASA_TAPO_DASHBOARD_URL=http://gaia.tail6a1dd7.ts.net:3000 \\
+    KASA_TAPO_DASHBOARD_URL=http://sdl2-server-gaia.tail6a1dd7.ts.net:8000 \\
         python scripts/control_camera.py --camera cam_hte_tapo_c245 status
 
 Commands to run it:
@@ -138,7 +138,7 @@ from typing import Any
 
 import httpx
 
-DASHBOARD_URL = os.environ.get("KASA_TAPO_DASHBOARD_URL", "http://100.64.254.6:3000")
+DASHBOARD_URL = os.environ.get("KASA_TAPO_DASHBOARD_URL", "http://100.64.254.6:8000")
 CAMERA_ID = os.environ.get("CAMERA_ID", "cam_hte_tapo_c245")
 
 # Valid PTZ directions, mirroring _DIRECTION_VECTORS in

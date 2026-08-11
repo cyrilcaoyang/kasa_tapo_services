@@ -1,11 +1,11 @@
 # Drop the two `handle*` blocks below into your dashboard's Caddyfile
-# block (above or below the existing `reverse_proxy 127.0.0.1:3000`
+# block (above or below the existing `reverse_proxy 100.64.254.6:8000`
 # directive). They route browser traffic to the gateway and to go2rtc.
 #
 # Browser -> Caddy (TLS) -> 127.0.0.1:1984 (go2rtc)         WS upgrade
 # Browser -> Caddy (TLS) -> 127.0.0.1:8002 (kasa-tapo-services)
 #
-# All other dashboard requests still go to Next.js on :3000, which
+# All other dashboard requests still go to Next.js on :8000, which
 # proxies /api/* to FastAPI on :8001.
 
 # go2rtc - WebSocket upgrade for the MSE feed.

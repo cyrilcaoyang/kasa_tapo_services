@@ -36,6 +36,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 from kasa_tapo_services.config import DeviceConfig, DeviceCredentials
 
@@ -94,6 +95,13 @@ def _rtsp_url(camera: DeviceConfig, lens_path: str, creds: DeviceCredentials) ->
     the resolved URL with the actual credentials inlined. The URL is
     NEVER logged - log calls always use the redacted form via
     :func:`_redact_url`.
+
+    Credentials are percent-encoded, same as in
+    :func:`bootstrap_go2rtc._rtsp_url`: Tapo accounts are email
+    addresses (``@``) and generated passwords routinely contain ``#``,
+    ``%``, ``:`` and ``/``. Inlined raw, ffmpeg parses userinfo up to
+    the *first* ``@`` and truncates at ``#``, yielding the misleading
+    ``Port missing in uri``.
     """
 
     if not creds.has_basic:
@@ -101,10 +109,9 @@ def _rtsp_url(camera: DeviceConfig, lens_path: str, creds: DeviceCredentials) ->
             f"Camera {camera.id!r} has no credentials in env; "
             f"set {camera.id.upper()}_USER and {camera.id.upper()}_PASS"
         )
-    return (
-        f"rtsp://{creds.user}:{creds.password}"
-        f"@{camera.host}:{camera.rtsp_port}/{lens_path}"
-    )
+    user = quote(creds.user or "", safe="")
+    password = quote(creds.password or "", safe="")
+    return f"rtsp://{user}:{password}@{camera.host}:{camera.rtsp_port}/{lens_path}"
 
 
 def _redact_url(url: str) -> str:

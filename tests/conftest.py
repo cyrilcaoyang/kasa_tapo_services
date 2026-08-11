@@ -18,6 +18,7 @@ from kasa_tapo_services.poller import StatusCache
 from kasa_tapo_services.routes import build_camera_router, build_plug_router
 from kasa_tapo_services.routes.registry import CameraClients, DeviceRegistry, PlugClients
 from kasa_tapo_services.tapo.media import RecordingHandle
+from kasa_tapo_services.tapo.onvif_client import PtzNudgeOutcome
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -31,9 +32,14 @@ def _stub_camera_clients(cfg) -> CameraClients:
 
     onvif = AsyncMock()
     onvif.is_reachable = AsyncMock(return_value=True)
+    # Plain attribute, not a coroutine: the stub models a PTZ-capable
+    # camera. Tests covering fixed cameras set it False (see
+    # test_onvif_fixed_camera.py).
+    onvif.has_ptz = True
     onvif.continuous_move = AsyncMock()
     onvif.stop = AsyncMock()
-    onvif.nudge = AsyncMock()
+    onvif.nudge = AsyncMock(return_value=PtzNudgeOutcome(detected=True))
+    onvif.get_position = AsyncMock(return_value=(0.0, 0.0))
     onvif.list_presets = AsyncMock(return_value=[
         PresetEntry(id="1", name="home"),
         PresetEntry(id="2", name="bench"),

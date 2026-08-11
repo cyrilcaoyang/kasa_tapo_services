@@ -24,7 +24,7 @@ ExecStart=/opt/kasa-tapo-services/.venv/bin/uvicorn \
 Restart=on-failure
 RestartSec=2
 
-# Standard hardening - same set as ac-dashboard-api.service in the
+# Standard hardening - same set as ac-organic-lab-api.service in the
 # dashboard repo.
 NoNewPrivileges=true
 ProtectSystem=strict
