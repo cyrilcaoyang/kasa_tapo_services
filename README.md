@@ -375,7 +375,7 @@ Reading the result:
 | Step 1 or 2 | Gateway host's Wi-Fi dropped, or the route is going out the wired interface. Nothing device-side to fix. |
 | Step 3 | Device is off, or its DHCP lease moved. Re-check the address in the Tapo/Kasa app and update `devices.yaml`. |
 | Step 4 (ONVIF only) | ONVIF disabled or wrong port — Tapo app → Advanced → ONVIF, default 2020. Tile goes `degraded`, not unreachable. |
-| Step 5 | Credentials. `<ID>_USER`/`<ID>_PASS` must be the **Camera Account**, which is distinct from the ONVIF account and from your TP-Link cloud login. |
+| Step 5 | Credentials. `<ID>_USER`/`<ID>_PASS` must be the **Camera Account**, which is distinct from the ONVIF account and from your TP-Link cloud login. (The cloud password has its own variable, `<ID>_CLOUD_PASS`, used only for the control API on newer firmware — see below.) |
 
 Two failure modes that look like a dead device but are not:
 
@@ -384,8 +384,18 @@ Two failure modes that look like a dead device but are not:
   no producer. Only worry if it stays false while a stream is open.
 * **`tapo_reachable: false` while `onvif_reachable: true`** costs you the
   privacy and day/night toggles but nothing else — health needs only
-  ONVIF and go2rtc, so the tile stays `ready`. Repeated failed pytapo
-  logins trigger a device-side lockout (`Temporary Suspension: Try again
-  in N seconds`) that the poll loop *keeps renewing*, so it will not
-  clear on its own: fix the Camera Account credentials, then restart the
-  gateway to stop the retry loop feeding it.
+  ONVIF and go2rtc, so the tile stays `ready`. Two distinct causes, told
+  apart by the gateway log:
+  * `tapo.getPrivacyMode failed: Invalid authentication data` **while
+    RTSP and ONVIF authenticate fine with the same password** means the
+    camera runs **newer firmware that rejects the Camera Account on the
+    control API**. The fix is not to change `<ID>_USER`/`<ID>_PASS`
+    (they are correct — RTSP proves it) but to add
+    `<ID>_CLOUD_PASS=<TP-Link cloud account password>`: the gateway then
+    logs in as local user `admin` with the cloud password, which is the
+    only form this firmware accepts.
+  * Repeated failed logins escalate to a device-side lockout
+    (`Temporary Suspension: Try again in N seconds`) that the poll
+    loop's retries keep re-triggering, so it never drains on its own:
+    fix the credentials as above, then restart the gateway so the retry
+    loop stops feeding it.
