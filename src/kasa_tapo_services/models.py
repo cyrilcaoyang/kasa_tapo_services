@@ -1,15 +1,28 @@
-"""Lab equipment status spec v1.0 envelope (vendored) + control bodies.
+"""STATUS_SPEC contract types (imported) + this gateway's control bodies.
 
-The first half of this file is a verbatim mirror of
-``ac-organic-lab/skills/src/lab_skills/models.py`` (the STATUS_SPEC v1.0
-contract). It is kept identical so the dashboard's ``HttpStatusAdapter``
-parses our responses without any per-device translation. The
-``EquipmentKind`` literal is extended here with the three kinds this
-gateway emits (``camera``, ``smart_plug``, ``power_strip``) - the
-dashboard's ``lab_skills`` mirror has the same additions.
+The contract half of this module used to be a hand-copied mirror of
+``ac-organic-lab/skills/src/lab_skills/models.py``. It is now imported
+from **``sdl-lab-contract``**, the shared package that is the single
+source for these types (ac-organic-lab ARCHITECTURE.md LG5). The
+re-exports below keep ``from kasa_tapo_services.models import ...``
+working for the rest of this package, so the swap is invisible to
+``routes/``, ``poller.py`` and ``main.py``.
 
-The second half is the gateway-only request/response bodies: PTZ moves,
-preset save/goto, privacy/streaming toggles, plug on/off.
+The three kinds this gateway emits (``camera``, ``smart_plug``,
+``power_strip``) are part of the shared ``EquipmentKind`` enum, so there
+is nothing left to extend locally.
+
+**This gateway stays on ``protocol_version: "1.0"``**, and importing
+v1.2 types does not change that. It exposes ``/control/*`` but implements
+no claim protocol, and STATUS_SPEC §9 is explicit that partial control
+without claims stays v1.0 — the read-only exemption that lets a
+monitoring-only device declare a higher version does not apply to a
+device that *has* actions to serialize. ``PROTOCOL_VERSION`` below is the
+contract's v1.0 default, which is exactly what we want to report.
+
+The second half of this file is the gateway-only request/response
+bodies: PTZ moves, preset save/goto, privacy/streaming toggles, snapshot
+and recording control, plug on/off.
 """
 
 from __future__ import annotations
@@ -18,98 +31,20 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-
-PROTOCOL_VERSION = "1.0"
-
-
-EquipmentKind = Literal[
-    "solid_doser",
-    "liquid_handler",
-    "press",
-    "fume_hood",
-    "robot_arm",
-    "environmental_sensor",
-    "hplc",
-    "plate_reader",
-    "plate_sealer",
-    "plate_stacker",
-    # Extensions emitted by this gateway. Mirrored in
-    # ac-organic-lab/skills/src/lab_skills/models.py.
-    "camera",
-    "smart_plug",
-    "power_strip",
-    "other",
-]
-
-
-EquipmentState = Literal[
-    "ready",
-    "busy",
-    "requires_init",
-    "degraded",
-    "dry_run",
-    "error",
-    "e_stop",
-    "unknown",
-]
-
-ErrorSeverity = Literal["info", "warning", "error", "critical"]
-
-
-class ComponentStatus(BaseModel):
-    connected: bool
-    state: str
-    message: str | None = None
-    last_event_at: datetime | None = None
-
-
-class MetricValue(BaseModel):
-    value: float | int | str | bool
-    unit: str | None = None
-    timestamp: datetime | None = None
-
-
-class ErrorInfo(BaseModel):
-    code: str | None = None
-    message: str
-    severity: ErrorSeverity
-    timestamp: datetime
-
-
-class EquipmentStatus(BaseModel):
-    """The unified ``GET /status`` envelope every equipment must return."""
-
-    protocol_version: str = PROTOCOL_VERSION
-
-    equipment_id: str
-    equipment_name: str
-    equipment_kind: EquipmentKind
-    equipment_version: str | None = None
-    host: str | None = None
-
-    equipment_status: EquipmentState
-    message: str | None = None
-    required_actions: list[str] = Field(default_factory=list)
-    allowed_actions: list[str] = Field(default_factory=list)
-
-    device_time: datetime
-    uptime_seconds: float | None = None
-
-    components: dict[str, ComponentStatus] = Field(default_factory=dict)
-    metrics: dict[str, MetricValue] = Field(default_factory=dict)
-    last_error: ErrorInfo | None = None
-
-    details: dict[str, Any] = Field(default_factory=dict)
-
-
-class ProbeResponse(BaseModel):
-    equipment_id: str
-    equipment_name: str
-    protocol_version: str = PROTOCOL_VERSION
-
-
-class HealthResponse(BaseModel):
-    status: Literal["healthy"] = "healthy"
+from sdl_lab_contract import (
+    PROTOCOL_VERSION,
+    SPEC_VERSION,
+    Activity,
+    ComponentStatus,
+    EquipmentKind,
+    EquipmentState,
+    EquipmentStatus,
+    ErrorInfo,
+    ErrorSeverity,
+    HealthResponse,
+    MetricValue,
+    ProbeResponse,
+)
 
 
 # ---------------------------------------------------------------------
@@ -316,7 +251,11 @@ class ControlAck(BaseModel):
 
 
 __all__ = [
+    # Re-exported from sdl-lab-contract so importers of this module do not
+    # need to know whether a type is contract-owned or gateway-owned.
     "PROTOCOL_VERSION",
+    "SPEC_VERSION",
+    "Activity",
     "CameraDetails",
     "ComponentStatus",
     "ControlAck",

@@ -201,7 +201,61 @@ Tests use mocked Tapo/ONVIF/Kasa clients - they do not require live hardware.
 
 ## Conformance
 
-`kasa-tapo-services` conforms to lab status spec **v1.0** (the per-device surface), with the following extensions:
+### Contract types come from `sdl-lab-contract`
+
+The STATUS_SPEC types are **imported**, not vendored. `models.py` used to
+carry a hand-copied mirror of the v1.0 envelope; it now re-exports the
+shared [`sdl-lab-contract`](https://github.com/AccelerationConsortium/sdl-lab-contract)
+package (pinned by tag in `[tool.uv.sources]`), which is the single
+source for these models across the lab — ac-organic-lab
+`ARCHITECTURE.md` LG5.
+
+```python
+from kasa_tapo_services.models import EquipmentStatus, ComponentStatus, MetricValue
+# -> re-exported from sdl_lab_contract; identical to what every other
+#    device repo and the lab-skills SDK parse against.
+```
+
+Two consequences of the swap:
+
+* The `camera` / `smart_plug` / `power_strip` kinds are now **part of the
+  shared enum**, so there is nothing left to extend locally. The comment
+  in the old `models.py` promising to keep a private copy in sync with
+  `lab_skills.models` is obsolete — there is one definition now.
+* The envelope gained the v1.2 fields `activity` and `activity_since`.
+  This gateway leaves them at their defaults (`"unknown"` / `null`),
+  which is the honest answer: it does not observe a "primary operation"
+  for a camera or a plug. Readers already treat an absent or `unknown`
+  activity as "the device did not say" (spec §8), so nothing downstream
+  changes.
+
+### Why this gateway stays on `protocol_version: "1.0"`
+
+Importing v1.2 types does **not** make this a v1.2 device, and the
+version it reports is deliberately unchanged.
+
+This gateway exposes a real `/control/*` surface (PTZ, presets, privacy,
+recording, plug switching) but implements **no claim protocol** — no
+`/control/claim`, `/control/heartbeat`, or `/control/release`, and no
+`X-Claim-Token` enforcement. STATUS_SPEC §9 is explicit about this case:
+the read-only exemption that lets a monitoring-only device declare v1.1
+or v1.2 on read-side merit alone applies only to a device with *nothing
+to claim*. **Partial control without claims stays v1.0.** The exemption
+is for having no actions to serialize, not for finding claims
+inconvenient.
+
+Practically this means concurrent writers are not arbitrated here: two
+clients can both move the same camera. That is tolerable for the
+convenience-class actions this gateway offers (nothing it exposes can
+damage hardware or a sample, which is also why the dashboard leaves
+`kind: camera` out of its control-password gate) and it is the reason
+plug outlets driving *equipment* are gated on the dashboard side
+instead. Adding claims is the prerequisite for ever reporting a higher
+version.
+
+### Per-device surface
+
+Beyond the baseline envelope:
 
 * `equipment_kind` may be `camera`, `smart_plug`, or `power_strip`.
 * For cameras, `details` contains:
