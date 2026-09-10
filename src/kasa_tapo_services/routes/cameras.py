@@ -38,7 +38,7 @@ from kasa_tapo_services.models import (
     StreamingRequest,
 )
 from kasa_tapo_services.tapo.bootstrap_go2rtc import _stream_name
-from kasa_tapo_services.tapo.onvif_client import PtzNudgeOutcome
+from kasa_tapo_services.tapo.onvif_client import PresetCapacityError, PtzNudgeOutcome
 from kasa_tapo_services.tapo.media import (
     RecordingHandle,
     list_camera_media,
@@ -194,6 +194,8 @@ def build_camera_router() -> APIRouter:
             raise HTTPException(status_code=503, detail="ONVIF not configured for this camera")
         try:
             preset_id = await bundle.onvif.save_preset(body.name)
+        except PresetCapacityError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:
             logger.exception("preset save failed for %s", camera_id)
             raise HTTPException(status_code=502, detail=f"Save failed: {exc}") from exc

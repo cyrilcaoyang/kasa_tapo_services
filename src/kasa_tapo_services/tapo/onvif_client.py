@@ -64,6 +64,10 @@ class OnvifError(RuntimeError):
     """
 
 
+class PresetCapacityError(OnvifError):
+    """The camera cannot allocate another saved position."""
+
+
 class OnvifCameraClient:
     """One ONVIF camera. Connects lazily, holds the PTZ + Media services."""
 
@@ -303,7 +307,17 @@ class OnvifCameraClient:
         request = self._ptz.create_type("SetPreset")
         request.ProfileToken = self._media_token
         request.PresetName = name
-        result = await self._ptz.SetPreset(request)
+        try:
+            result = await self._ptz.SetPreset(request)
+        except Exception as exc:
+            # C245D firmware reports this SOAP fault when its preset slots
+            # are full. Do not delete or overwrite a position implicitly.
+            if "number of presets limit reached" in str(exc).lower():
+                raise PresetCapacityError(
+                    "Camera preset storage is full. Delete an unused preset "
+                    "and then save again. Existing presets have not been changed."
+                ) from exc
+            raise
         # ``SetPreset`` returns the assigned token (string in Profile T,
         # an object with a ``PresetToken`` attribute on some stacks).
         if hasattr(result, "PresetToken"):
@@ -331,4 +345,4 @@ class OnvifCameraClient:
         await self._ptz.RemovePreset(request)
 
 
-__all__ = ["OnvifCameraClient", "OnvifError", "PtzNudgeOutcome"]
+__all__ = ["OnvifCameraClient", "OnvifError", "PresetCapacityError", "PtzNudgeOutcome"]

@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
+import pytest
 from fastapi.testclient import TestClient
+from zeep.exceptions import Fault
+
+from kasa_tapo_services.tapo.onvif_client import OnvifCameraClient
 
 
 def test_probe(client: TestClient) -> None:
@@ -131,6 +136,38 @@ def test_save_and_goto_preset(client: TestClient) -> None:
 def test_delete_preset(client: TestClient) -> None:
     r = client.delete("/cameras/cam_lab499_west/control/preset/9")
     assert r.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("fault", "status", "message"),
+    [
+        ("Number of presets limit reached", 409, "Camera preset storage is full"),
+        ("Device unavailable", 502, "Save failed: Device unavailable"),
+    ],
+)
+def test_preset_save_camera_fault(client, stub_registry, fault, status, message) -> None:
+    """Exercise the real ONVIF adapter through the route, with only SOAP stubbed."""
+    onvif = OnvifCameraClient("203.0.113.1", 2020, "u", "p")
+    onvif._cam = object()
+    onvif._media_token = "profile1"
+    ptz = Mock()
+    ptz.create_type.return_value = SimpleNamespace()
+    ptz.SetPreset = AsyncMock(side_effect=Fault(fault))
+    onvif._ptz = ptz
+    stub_registry.camera("cam_lab499_west").onvif = onvif
+
+    response = client.post(
+        "/cameras/cam_lab499_west/control/preset/save", json={"name": "HOME"}
+    )
+
+    assert response.status_code == status
+    assert message in response.json()["detail"]
+    ptz.SetPreset.assert_awaited_once()
+    request = ptz.SetPreset.call_args.args[0]
+    assert request.ProfileToken == "profile1"
+    assert request.PresetName == "HOME"
+    assert not hasattr(request, "PresetToken")
+    ptz.RemovePreset.assert_not_called()
 
 
 def test_privacy_toggle(client: TestClient) -> None:

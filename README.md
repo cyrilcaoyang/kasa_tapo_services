@@ -191,7 +191,7 @@ For each device the gateway publishes:
 | GET    | `/cameras/{id}/health`                                | -                                     |
 | GET    | `/cameras/{id}/status`                                | -                                     |
 | POST   | `/cameras/{id}/control/ptz`                           | `{direction, speed?, duration_ms?}` or `{pan, tilt, zoom?}` (continuous) |
-| POST   | `/cameras/{id}/control/preset/save`                   | `{name}`                              |
+| POST   | `/cameras/{id}/control/preset/save`                   | `{name}`; returns 409 if preset storage is full |
 | POST   | `/cameras/{id}/control/preset/goto`                   | `{preset_id}`                         |
 | DELETE | `/cameras/{id}/control/preset/{preset_id}`            | -                                     |
 | POST   | `/cameras/{id}/control/privacy`                       | `{enabled}`                           |
