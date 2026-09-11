@@ -152,6 +152,8 @@ DIRECTIONS = [
     "up_right",
     "down_left",
     "down_right",
+    "zoom_in",   # 409 on cameras whose PTZ node has no zoom axis (C245D/C246D)
+    "zoom_out",
     "stop",
 ]
 

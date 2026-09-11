@@ -36,6 +36,9 @@ def _stub_camera_clients(cfg) -> CameraClients:
     # camera. Tests covering fixed cameras set it False (see
     # test_onvif_fixed_camera.py).
     onvif.has_ptz = True
+    # No zoom axis, like every Tapo dual-lens head in the fleet; a bare
+    # AsyncMock attribute would be truthy and mis-report details.has_zoom.
+    onvif.has_zoom = False
     onvif.continuous_move = AsyncMock()
     onvif.stop = AsyncMock()
     onvif.nudge = AsyncMock(return_value=PtzNudgeOutcome(detected=True))

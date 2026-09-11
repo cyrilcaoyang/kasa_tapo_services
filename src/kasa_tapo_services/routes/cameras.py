@@ -38,7 +38,11 @@ from kasa_tapo_services.models import (
     StreamingRequest,
 )
 from kasa_tapo_services.tapo.bootstrap_go2rtc import _stream_name
-from kasa_tapo_services.tapo.onvif_client import PresetCapacityError, PtzNudgeOutcome
+from kasa_tapo_services.tapo.onvif_client import (
+    PresetCapacityError,
+    PtzNudgeOutcome,
+    ZoomUnsupportedError,
+)
 from kasa_tapo_services.tapo.media import (
     RecordingHandle,
     list_camera_media,
@@ -52,20 +56,25 @@ from .registry import CameraClients, DeviceRegistry, get_registry
 logger = logging.getLogger(__name__)
 
 
-# Mapping from a UI direction button to a (pan, tilt) ONVIF velocity vector.
-# Values are in [-1, 1]; the diagonal entries normalise so the magnitude is
-# the same as cardinal moves (otherwise diagonals would feel ~1.4× faster).
+# Mapping from a UI direction button to a (pan, tilt, zoom) ONVIF velocity
+# vector. Values are in [-1, 1]; the diagonal entries normalise so the
+# magnitude is the same as cardinal moves (otherwise diagonals would feel
+# ~1.4× faster). ``zoom_in`` / ``zoom_out`` only succeed on a camera whose
+# PTZ node has a zoom axis (``details.has_zoom``); the ONVIF client refuses
+# them otherwise and the route answers 409.
 _DIAG = 1.0 / 1.41421356
-_DIRECTION_VECTORS: dict[PtzDirection, tuple[float, float]] = {
-    "up": (0.0, 1.0),
-    "down": (0.0, -1.0),
-    "left": (-1.0, 0.0),
-    "right": (1.0, 0.0),
-    "up_left": (-_DIAG, _DIAG),
-    "up_right": (_DIAG, _DIAG),
-    "down_left": (-_DIAG, -_DIAG),
-    "down_right": (_DIAG, -_DIAG),
-    "stop": (0.0, 0.0),
+_DIRECTION_VECTORS: dict[PtzDirection, tuple[float, float, float]] = {
+    "up": (0.0, 1.0, 0.0),
+    "down": (0.0, -1.0, 0.0),
+    "left": (-1.0, 0.0, 0.0),
+    "right": (1.0, 0.0, 0.0),
+    "up_left": (-_DIAG, _DIAG, 0.0),
+    "up_right": (_DIAG, _DIAG, 0.0),
+    "down_left": (-_DIAG, -_DIAG, 0.0),
+    "down_right": (_DIAG, -_DIAG, 0.0),
+    "zoom_in": (0.0, 0.0, 1.0),
+    "zoom_out": (0.0, 0.0, -1.0),
+    "stop": (0.0, 0.0, 0.0),
 }
 
 
@@ -145,14 +154,14 @@ def build_camera_router() -> APIRouter:
             raise HTTPException(status_code=503, detail="ONVIF not configured for this camera")
         try:
             if isinstance(body, PtzNudgeRequest):
-                pan, tilt = _DIRECTION_VECTORS[body.direction]
+                pan, tilt, zoom = _DIRECTION_VECTORS[body.direction]
                 if body.direction == "stop":
                     await bundle.onvif.stop()
                     return ControlAck(message="stopped")
                 outcome = await bundle.onvif.nudge(
                     pan=pan * body.speed,
                     tilt=tilt * body.speed,
-                    zoom=0.0,
+                    zoom=zoom * body.speed,
                     duration_ms=body.duration_ms,
                 )
                 # Soft-fail (200 + ok:false): the head is at a physical
@@ -175,6 +184,12 @@ def build_camera_router() -> APIRouter:
                 return ControlAck(message="moving")
         except HTTPException:
             raise
+        except ZoomUnsupportedError as exc:
+            # A fixed property of this camera, not a fault: the ONVIF PTZ
+            # node has no zoom axis, so there is nothing to drive. 409 (the
+            # request conflicts with the device's configuration) rather than
+            # 502, and no ``last_error`` — the camera did nothing wrong.
+            raise HTTPException(status_code=409, detail=f"Zoom not supported: {exc}") from exc
         except Exception as exc:
             logger.exception("PTZ failed for %s", camera_id)
             raise HTTPException(status_code=502, detail=f"PTZ failed: {exc}") from exc
@@ -731,6 +746,7 @@ async def _build_status(bundle: CameraClients, registry: DeviceRegistry) -> Equi
         equipment_state = "unknown"
         last_error_message = "Camera unreachable: neither ONVIF nor Tapo API responded"
 
+    has_ptz = onvif_reachable and bundle.onvif is not None and bundle.onvif.has_ptz
     details = CameraDetails(
         lenses=lenses,
         presets=presets,
@@ -739,12 +755,17 @@ async def _build_status(bundle: CameraClients, registry: DeviceRegistry) -> Equi
         onvif_reachable=onvif_reachable,
         tapo_reachable=tapo_reachable,
         go2rtc_reachable=go2rtc_reachable,
+        # Only a PTZ node can have a zoom axis; ``has_zoom`` is read from the
+        # node at connect time (see OnvifCameraClient._detect_zoom_axis).
+        has_zoom=bool(has_ptz and bundle.onvif is not None and bundle.onvif.has_zoom),
     ).model_dump(mode="json")
 
     allowed: list[str] = []
     # Fixed cameras (Tapo C100/C110/...) are ONVIF-reachable but expose no
     # PTZ service; don't advertise actions the hardware cannot perform.
-    if onvif_reachable and bundle.onvif is not None and bundle.onvif.has_ptz:
+    # (``ptz`` stays advertised on a zoom-less head: pan/tilt still work, and
+    # the per-direction zoom capability is carried by ``details.has_zoom``.)
+    if has_ptz:
         allowed += ["ptz", "preset/save", "preset/goto", "preset/{id}"]
     if tapo_reachable:
         allowed += ["privacy"]

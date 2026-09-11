@@ -35,17 +35,21 @@ Consequences worth internalizing:
 
 ### Current fleet
 
-The five devices this gateway fronts today (see `devices.yaml`):
+The seven devices this gateway fronts today (see `devices.yaml`):
 
 | `id` | Model | Lenses / outlets | Notes |
 |---|---|---|---|
-| `cam_hte_tapo_c245` | Tapo C245D | `wide` → `stream1`, `tele` → `stream6` | PTZ on the tele lens only |
+| `cam_hte_tapo_c245` | Tapo C245D | `wide` → `stream1`, `tele` → `stream6` | PTZ on the tele lens only; no zoom axis |
 | `cam_echem_tapo_c245` | Tapo C245D | `wide` → `stream1`, `tele` → `stream6` | Echem bench; same credentials as the HTE unit |
 | `cam_echem_tapo_c100` | Tapo C100 | `main` → `stream1` | **Fixed** — no PTZ service, no presets |
+| `cam_gibbie_tapo_c100` | Tapo C100 | `main` → `stream1` | **Fixed** — Gibbie sample-prep bench |
+| `cam_ligand_tapo_d246` | Tapo **C246D** | `wide` → `stream1`, `tele` → `stream6` | Ligand Development bench; PTZ on the tele lens only; no zoom axis (own on-device Camera Account) |
 | `plug_hte_strip_right` | Kasa HS300 | 6 outlets | Legacy XOR protocol, port 9999, no credentials |
 | `plug_hte_strip_left` | Kasa HS300 | 6 outlets | Legacy XOR protocol, port 9999, no credentials |
 
-> **PTZ on the C245D is tele-only.** The wide lens is fixed to the camera base; ONVIF PTZ moves only the telephoto lens. This is a property of the hardware, not a gateway limitation.
+> **PTZ on the C245D / C246D is tele-only.** The wide lens is fixed to the camera base; ONVIF PTZ moves only the telephoto lens. This is a property of the hardware, not a gateway limitation.
+>
+> **There is no zoom axis either.** Probed live 2026-09-10 on both models: the ONVIF PTZ node advertises pan/tilt spaces only (no `ContinuousZoomVelocitySpace`, no `AbsoluteZoomPositionSpace`) and `GetStatus` reports no zoom position, and pytapo has no zoom method. The camera's "zoom" is the wide → tele lens switch. The gateway reports this as `details.has_zoom: false`, refuses `zoom_in` / `zoom_out` (and a non-zero `zoom` in the continuous body) with **409** instead of letting the firmware ignore them, and the dashboard's camera tile layers a *digital* zoom on the stream. A future camera whose node does advertise a zoom space gets `has_zoom: true` and working zoom nudges with no gateway change.
 
 ## Supported device kinds
 
@@ -55,7 +59,7 @@ The five devices this gateway fronts today (see `devices.yaml`):
 | `smart_plug`  | Kasa **HS103** (and HS100/HS105/HS110) | `python-kasa` | `on` / `off` / `toggle` |
 | `power_strip` | Kasa **HS300** (6 outlets, KP303 too)  | `python-kasa` | `on` / `off` / `toggle` (whole strip or per-outlet via `outlet:`) |
 
-Cameras emit a `details.lenses[]` block (one entry per physical lens) and a `details.presets[]` list. **Fixed cameras** (C100/C110/…) answer ONVIF device + media calls but expose no PTZ service; they are fully reachable and streamable, and the gateway simply omits `ptz` / `preset/*` from `allowed_actions` and reports no presets. Power strips emit one `ComponentStatus` per outlet under `components` (`outlet_0`, `outlet_1`, …) so the dashboard can render the outlet grid generically.
+Cameras emit a `details.lenses[]` block (one entry per physical lens), a `details.presets[]` list, and `details.has_zoom` (whether the PTZ node has a zoom axis — see the callout above). **Fixed cameras** (C100/C110/…) answer ONVIF device + media calls but expose no PTZ service; they are fully reachable and streamable, and the gateway simply omits `ptz` / `preset/*` from `allowed_actions` and reports no presets. Power strips emit one `ComponentStatus` per outlet under `components` (`outlet_0`, `outlet_1`, …) so the dashboard can render the outlet grid generically.
 
 ## Install
 
@@ -190,7 +194,7 @@ For each device the gateway publishes:
 | GET    | `/cameras/{id}/`                                      | -                                     |
 | GET    | `/cameras/{id}/health`                                | -                                     |
 | GET    | `/cameras/{id}/status`                                | -                                     |
-| POST   | `/cameras/{id}/control/ptz`                           | `{direction, speed?, duration_ms?}` or `{pan, tilt, zoom?}` (continuous) |
+| POST   | `/cameras/{id}/control/ptz`                           | `{direction, speed?, duration_ms?}` or `{pan, tilt, zoom?}` (continuous). `direction` includes `zoom_in` / `zoom_out`; both (and a non-zero `zoom`) return 409 when `details.has_zoom` is false |
 | POST   | `/cameras/{id}/control/preset/save`                   | `{name}`; returns 409 if preset storage is full |
 | POST   | `/cameras/{id}/control/preset/goto`                   | `{preset_id}`                         |
 | DELETE | `/cameras/{id}/control/preset/{preset_id}`            | -                                     |

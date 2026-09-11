@@ -214,3 +214,84 @@ def test_streaming_toggle_flips_in_memory_flag(client: TestClient, stub_registry
     )
     r = client.get("/cameras/cam_lab499_west/status")
     assert all(lens["mse_url"] for lens in r.json()["details"]["lenses"])
+
+
+# -- Zoom directions ------------------------------------------------------
+#
+# ``zoom_in`` / ``zoom_out`` ride the same nudge body as pan/tilt. Whether
+# they *work* is a property of the camera's ONVIF PTZ node (``details.
+# has_zoom``); the client refuses a zoom velocity on a node with no zoom
+# axis and the route turns that into 409.
+
+
+@pytest.mark.parametrize(("direction", "expected_zoom"), [("zoom_in", 0.5), ("zoom_out", -0.5)])
+def test_ptz_zoom_nudge_drives_only_the_zoom_axis(
+    client: TestClient, stub_registry, direction: str, expected_zoom: float
+) -> None:
+    from kasa_tapo_services.tapo.onvif_client import PtzNudgeOutcome
+
+    cam = stub_registry.camera("cam_lab499_west")
+    cam.onvif.nudge = AsyncMock(return_value=PtzNudgeOutcome())
+    r = client.post(
+        "/cameras/cam_lab499_west/control/ptz",
+        json={"direction": direction, "speed": 0.5, "duration_ms": 300},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+    assert r.json()["message"] == f"nudged {direction}"
+    kwargs = cam.onvif.nudge.await_args.kwargs
+    assert kwargs["pan"] == 0.0 and kwargs["tilt"] == 0.0
+    assert kwargs["zoom"] == pytest.approx(expected_zoom)
+    assert kwargs["duration_ms"] == 300
+
+
+def test_ptz_zoom_nudge_without_zoom_axis_is_409(client: TestClient, stub_registry) -> None:
+    from kasa_tapo_services.tapo.onvif_client import ZoomUnsupportedError
+
+    cam = stub_registry.camera("cam_lab499_west")
+    cam.onvif.nudge = AsyncMock(
+        side_effect=ZoomUnsupportedError("camera 203.0.113.1 has no zoom axis")
+    )
+    r = client.post(
+        "/cameras/cam_lab499_west/control/ptz",
+        json={"direction": "zoom_in"},
+    )
+    assert r.status_code == 409, r.text
+    assert "no zoom axis" in r.json()["detail"]
+
+
+def test_ptz_continuous_zoom_without_zoom_axis_is_409(client: TestClient, stub_registry) -> None:
+    from kasa_tapo_services.tapo.onvif_client import ZoomUnsupportedError
+
+    cam = stub_registry.camera("cam_lab499_west")
+    cam.onvif.continuous_move = AsyncMock(
+        side_effect=ZoomUnsupportedError("camera 203.0.113.1 has no zoom axis")
+    )
+    r = client.post(
+        "/cameras/cam_lab499_west/control/ptz",
+        json={"pan": 0.0, "tilt": 0.0, "zoom": 0.4},
+    )
+    assert r.status_code == 409, r.text
+
+
+def test_status_reports_zoom_axis(client: TestClient, stub_registry) -> None:
+    r = client.get("/cameras/cam_lab499_west/status")
+    assert r.status_code == 200
+    assert r.json()["details"]["has_zoom"] is False
+    # ``ptz`` stays advertised: pan/tilt work on a zoom-less head.
+    assert "ptz" in r.json()["allowed_actions"]
+
+    stub_registry.camera("cam_lab499_west").onvif.has_zoom = True
+    r = client.get("/cameras/cam_lab499_west/status")
+    assert r.json()["details"]["has_zoom"] is True
+
+
+def test_status_no_zoom_without_ptz(client: TestClient, stub_registry) -> None:
+    """A fixed camera cannot have a zoom axis even if the stub claims one."""
+
+    cam = stub_registry.camera("cam_lab499_west")
+    cam.onvif.has_ptz = False
+    cam.onvif.has_zoom = True
+    r = client.get("/cameras/cam_lab499_west/status")
+    assert r.json()["details"]["has_zoom"] is False
+    assert "ptz" not in r.json()["allowed_actions"]

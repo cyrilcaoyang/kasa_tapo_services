@@ -52,7 +52,16 @@ from sdl_lab_contract import (
 # ---------------------------------------------------------------------
 
 
-PtzDirection = Literal["up", "down", "left", "right", "up_left", "up_right", "down_left", "down_right", "stop"]
+# ``zoom_in`` / ``zoom_out`` drive the ONVIF zoom axis. They are accepted on
+# every PTZ camera for a uniform client surface, but only *work* when the
+# camera's PTZ node advertises a zoom space (``CameraDetails.has_zoom``);
+# otherwise ``/control/ptz`` answers 409 rather than silently doing nothing.
+PtzDirection = Literal[
+    "up", "down", "left", "right",
+    "up_left", "up_right", "down_left", "down_right",
+    "zoom_in", "zoom_out",
+    "stop",
+]
 
 
 class PtzNudgeRequest(BaseModel):
@@ -219,6 +228,13 @@ class CameraDetails(BaseModel):
     onvif_reachable: bool = False
     tapo_reachable: bool = False
     go2rtc_reachable: bool = False
+    # True when the camera's ONVIF PTZ node advertises a continuous zoom
+    # velocity space - i.e. ``zoom_in`` / ``zoom_out`` nudges (and a non-zero
+    # ``zoom`` in the continuous body) actually drive a zoom axis. Every Tapo
+    # dual-lens unit in the fleet (C245D, C246D; probed live 2026-09-10)
+    # reports False: their "zoom" is the fixed wide lens vs. the tele lens on
+    # the PTZ head, and the dashboard layers a digital zoom on the stream.
+    has_zoom: bool = False
 
 
 # ---------------------------------------------------------------------
