@@ -123,3 +123,51 @@ def test_disabled_devices_are_skipped() -> None:
     payload = render_go2rtc_yaml(cfg)
     assert "cam_active_main" in payload["streams"]
     assert "cam_off_main" not in payload["streams"]
+
+
+def test_renders_read_only_http_relay_streams() -> None:
+    cfg = GatewayConfig.model_validate(
+        {
+            "relay_streams": [
+                {
+                    "name": "external_mjpeg_main",
+                    "source": "ffmpeg:http://camera.invalid/video#video=h264",
+                },
+                {
+                    "name": "disabled_feed",
+                    "source": "http://camera.invalid/video",
+                    "enabled": False,
+                },
+            ]
+        }
+    )
+    payload = render_go2rtc_yaml(cfg)
+    assert payload["streams"] == {
+        "external_mjpeg_main": [
+            "ffmpeg:http://camera.invalid/video#video=h264"
+        ]
+    }
+
+
+def test_relay_stream_cannot_shadow_a_camera_lens() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="stream names must be unique"):
+        GatewayConfig.model_validate(
+            {
+                "devices": [
+                    {
+                        "id": "cam",
+                        "name": "Camera",
+                        "kind": "camera",
+                        "host": "192.0.2.1",
+                        "lenses": [
+                            {"id": "main", "label": "Main", "rtsp_path": "stream1"}
+                        ],
+                    }
+                ],
+                "relay_streams": [
+                    {"name": "cam_main", "source": "http://camera.invalid/video"}
+                ],
+            }
+        )

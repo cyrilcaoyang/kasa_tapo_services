@@ -61,6 +61,18 @@ class OutletConfig(BaseModel):
     label: str | None = None
 
 
+class RelayStreamConfig(BaseModel):
+    """An additional go2rtc source that is not a gateway-controlled camera.
+
+    This is for read-only feeds such as an instrument's built-in HTTP/MJPEG
+    camera. It creates no STATUS_SPEC device and exposes no control surface.
+    """
+
+    name: str = Field(min_length=1, pattern=r"^[a-z][a-z0-9_]*$")
+    source: str = Field(min_length=1)
+    enabled: bool = True
+
+
 class DeviceConfig(BaseModel):
     """One device entry in ``devices.yaml``.
 
@@ -104,6 +116,19 @@ class DeviceConfig(BaseModel):
 
 class GatewayConfig(BaseModel):
     devices: list[DeviceConfig] = Field(default_factory=list)
+    relay_streams: list[RelayStreamConfig] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_relay_stream_names(self) -> GatewayConfig:
+        names = [stream.name for stream in self.relay_streams]
+        names += [
+            f"{camera.id}_{lens.id}"
+            for camera in self.cameras()
+            for lens in camera.lenses or []
+        ]
+        if len(names) != len(set(names)):
+            raise ValueError("go2rtc stream names must be unique")
+        return self
 
     def by_id(self, device_id: str) -> DeviceConfig | None:
         for d in self.devices:

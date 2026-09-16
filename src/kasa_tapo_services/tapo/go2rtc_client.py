@@ -10,7 +10,7 @@ go2rtc's HTTP surface is documented in the upstream README; we use:
 * ``GET /api/streams`` - returns a dict ``{name: producers[]}``.
 * ``GET /api/streams?src=<name>`` - per-stream info; we look at
   ``producers[*].state`` ("connected" / "reconnecting" / etc.).
-* ``PUT /api/streams?src=<name>&{name}=<rtsp_url>`` - add or replace.
+* ``PUT /api/streams?src=<source_url>&name=<name>`` - add or replace.
 * ``DELETE /api/streams?src=<name>`` - remove.
 """
 
@@ -86,7 +86,7 @@ class Go2RtcClient:
 
     async def add_stream(self, name: str, source_url: str) -> None:
         client = await self._get_client()
-        r = await client.put("/api/streams", params={"src": name, "name": source_url})
+        r = await client.put("/api/streams", params={"src": source_url, "name": name})
         r.raise_for_status()
 
     async def remove_stream(self, name: str) -> None:

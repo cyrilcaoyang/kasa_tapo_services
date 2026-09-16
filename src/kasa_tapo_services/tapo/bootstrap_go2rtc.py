@@ -77,6 +77,9 @@ def render_go2rtc_yaml(
             continue
         for lens in camera.lenses:
             streams[_stream_name(camera, lens.id)] = [_rtsp_url(camera, lens.rtsp_path)]
+    for relay in config.relay_streams:
+        if relay.enabled:
+            streams[relay.name] = [relay.source]
     payload: dict = {
         # `api.origin` controls the WebSocket Origin allow-list. We default
         # to `*` because go2rtc is bound to loopback (`api.listen`
