@@ -52,6 +52,11 @@ sdl-lab-contract = { git = "https://github.com/AccelerationConsortium/sdl-lab-co
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# Ship the agent guide + API reference inside the wheel; documentation.py
+# reads them through importlib.resources, not from the source tree.
+kasa_tapo_services = ["docs/*.md"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

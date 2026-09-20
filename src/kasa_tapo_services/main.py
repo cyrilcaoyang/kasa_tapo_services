@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
+from .documentation import router as documentation_router
 from .models import EquipmentStatus, MetricValue
 from .routes import build_camera_router, build_plug_router
 from .routes.registry import DeviceRegistry, build_registry_from_disk
@@ -87,6 +88,7 @@ app.add_middleware(
 
 app.include_router(build_camera_router())
 app.include_router(build_plug_router())
+app.include_router(documentation_router)
 
 
 @app.get("/", tags=["meta"])
