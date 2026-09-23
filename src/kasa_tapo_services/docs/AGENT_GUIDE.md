@@ -93,13 +93,14 @@ Each device has a background poller that rebuilds its envelope on an interval �
 **2 s for plugs, 5 s for cameras** by default (`KASA_TAPO_PLUG_POLL_INTERVAL_S`,
 `KASA_TAPO_CAMERA_POLL_INTERVAL_S`). `/status` serves that cache, so dashboard
 fan-out is decoupled from the 1–2 s ONVIF SOAP round trip and the multi-second
-HS300 emeter sweep. Before the first poll completes, `/status` builds the
-envelope live instead of 404-ing.
+HS300 emeter sweep. Before the first poll completes, `/status` returns `unknown` while waiting
+for the initial reading.
 
-Poll failures are logged and swallowed, and the cache keeps the **previous**
-envelope. A device that just dropped off the Wi-Fi can therefore read `ready`
-for a cycle or two. `device_time` is when that envelope was built — compare it
-against your own clock if freshness matters.
+Polls have a 10 s deadline. Failed or timed-out polls replace cached readiness
+with `unknown` and discard old readings and actions. Cached envelopes older
+than 30 s are also served as `unknown`. `device_time` retains the time of the
+last device reading. Camera reachability requires a fresh ONVIF request even
+when the client is already connected.
 
 Every `/control/*` route wakes its device's poller immediately, so a follow-up
 `/status` reflects the change within one cycle. The `state` in a `ControlAck`

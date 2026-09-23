@@ -654,13 +654,12 @@ async def _build_status(bundle: CameraClients, registry: DeviceRegistry) -> Equi
     presets: list[PresetEntry] = []
     privacy_mode = False
 
-    onvif_task = asyncio.create_task(_probe_onvif(bundle))
-    tapo_task = asyncio.create_task(_probe_tapo(bundle))
-    go2rtc_task = asyncio.create_task(registry.go2rtc.is_reachable())
-
-    onvif_reachable, presets = await onvif_task
-    tapo_reachable, privacy_mode = await tapo_task
-    go2rtc_reachable = await go2rtc_task
+    # Gather propagates cancellation to every probe when a poll times out.
+    onvif_result, tapo_result, go2rtc_reachable = await asyncio.gather(
+        _probe_onvif(bundle), _probe_tapo(bundle), registry.go2rtc.is_reachable()
+    )
+    onvif_reachable, presets = onvif_result
+    tapo_reachable, privacy_mode = tapo_result
 
     # ``streaming_enabled`` is an explicit per-camera flag controlled by
     # the dashboard toggle (see /control/streaming). It is NOT computed

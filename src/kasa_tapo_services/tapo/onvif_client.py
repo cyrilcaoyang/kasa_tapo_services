@@ -211,9 +211,13 @@ class OnvifCameraClient:
     async def is_reachable(self) -> bool:
         try:
             await self._connect()
+            # A cached client does not prove the camera is still online.
+            service = await self._cam.create_devicemgmt_service()
+            await asyncio.wait_for(service.GetDeviceInformation(), timeout=5.0)
             return True
         except Exception as exc:
             logger.debug("ONVIF probe %s:%s failed: %s", self._host, self._port, exc)
+            await self.close()
             return False
 
     # -- PTZ ---------------------------------------------------------------

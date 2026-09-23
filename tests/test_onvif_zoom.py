@@ -46,6 +46,9 @@ class _FakeCamera:
         self._ptz = ptz
         self.update_xaddrs = AsyncMock()
 
+    async def create_devicemgmt_service(self):
+        return SimpleNamespace(GetDeviceInformation=AsyncMock())
+
     async def create_ptz_service(self):
         return self._ptz
 

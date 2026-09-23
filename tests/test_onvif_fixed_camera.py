@@ -33,6 +33,9 @@ class _FakeCamera:
         self._ptz_error = ptz_error
         self.update_xaddrs = AsyncMock()
 
+    async def create_devicemgmt_service(self):
+        return types.SimpleNamespace(GetDeviceInformation=AsyncMock())
+
     async def create_ptz_service(self):
         if self._ptz_error is not None:
             raise self._ptz_error
@@ -149,3 +152,18 @@ def test_ptz_camera_status_still_advertises_ptz(client: TestClient) -> None:
 
     assert "ptz" in body["allowed_actions"]
     assert "preset/goto" in body["allowed_actions"]
+
+
+@pytest.mark.parametrize("ptz_error", [None, _NO_PTZ])
+async def test_connected_camera_disappears_and_recovers(fake_onvif, ptz_error):
+    fake_onvif(ptz_error)
+    client = OnvifCameraClient("203.0.113.1", 2020, "u", "p")
+    assert await client.is_reachable()
+    probe = AsyncMock(side_effect=OSError("camera powered off"))
+    client._cam.create_devicemgmt_service = AsyncMock(
+        return_value=types.SimpleNamespace(GetDeviceInformation=probe)
+    )
+    assert not await client.is_reachable()
+    probe.assert_awaited_once()
+    assert client._cam is None
+    assert await client.is_reachable()

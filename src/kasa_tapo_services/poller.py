@@ -49,7 +49,28 @@ class StatusCache:
 
     def get(self, device_id: str) -> EquipmentStatus | None:
         entry = self._entries.get(device_id)
-        return entry.status if entry else None
+        if entry is None:
+            return None
+        if time.monotonic() - entry.fetched_at > 30.0:
+            return self._unavailable(entry.status, "Device status is stale")
+        return entry.status
+
+    @staticmethod
+    def _unavailable(status: EquipmentStatus, message: str) -> EquipmentStatus:
+        return EquipmentStatus(
+            equipment_id=status.equipment_id,
+            equipment_name=status.equipment_name,
+            equipment_kind=status.equipment_kind,
+            host=status.host,
+            equipment_status="unknown",
+            message=message,
+            device_time=status.device_time,
+        )
+
+    def mark_unavailable(self, device_id: str, message: str) -> None:
+        entry = self._entries.get(device_id)
+        if entry is not None:
+            self.put(device_id, self._unavailable(entry.status, message))
 
     def age_seconds(self, device_id: str) -> float | None:
         entry = self._entries.get(device_id)
@@ -64,8 +85,8 @@ class DevicePoller:
 
     The builder callable is invoked once per ``interval_s`` (or sooner if
     :meth:`request_refresh` is called). Builder failures are logged and
-    swallowed: the cache keeps its previous envelope so a single device
-    hiccup doesn't blank the dashboard tile.
+    swallowed: previous readings are replaced with unknown status so
+    an unreachable device cannot remain ready.
     """
 
     def __init__(
@@ -74,11 +95,13 @@ class DevicePoller:
         interval_s: float,
         builder: StatusBuilder,
         cache: StatusCache,
+        timeout_s: float = 10.0,
     ) -> None:
         self._device_id = device_id
         self._interval_s = interval_s
         self._builder = builder
         self._cache = cache
+        self._timeout_s = timeout_s
         self._refresh_event = asyncio.Event()
         self._task: asyncio.Task | None = None
 
@@ -105,12 +128,15 @@ class DevicePoller:
     async def _run(self) -> None:
         while True:
             try:
-                status = await self._builder()
+                status = await asyncio.wait_for(self._builder(), timeout=self._timeout_s)
                 self._cache.put(self._device_id, status)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 logger.warning("poll %s failed: %s", self._device_id, exc)
+                self._cache.mark_unavailable(
+                    self._device_id, f"Device status poll failed: {exc or type(exc).__name__}"
+                )
             try:
                 await asyncio.wait_for(self._refresh_event.wait(), timeout=self._interval_s)
             except asyncio.TimeoutError:

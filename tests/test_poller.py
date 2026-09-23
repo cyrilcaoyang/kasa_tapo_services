@@ -95,7 +95,7 @@ async def test_poller_writes_cache_and_request_refresh_wakes_it() -> None:
 @pytest.mark.asyncio
 async def test_poller_survives_builder_exception() -> None:
     """A single builder failure must not kill the poll loop; the cache
-    keeps the last good envelope while we recover."""
+    marks the device unknown until we recover."""
 
     cache = StatusCache()
     state = {"i": 0}
@@ -121,13 +121,13 @@ async def test_poller_survives_builder_exception() -> None:
             await asyncio.sleep(0.01)
         assert cache.get("dev").message == "ok_1"  # type: ignore[union-attr]
 
-        # Second poll raises - cache should keep ok_1.
+        # Second poll raises - cached readiness must be invalidated.
         poller.request_refresh()
         for _ in range(50):
             if state["i"] >= 2:
                 break
             await asyncio.sleep(0.01)
-        assert cache.get("dev").message == "ok_1"  # type: ignore[union-attr]
+        assert cache.get("dev").equipment_status == "unknown"  # type: ignore[union-attr]
 
         # Third poll succeeds.
         poller.request_refresh()
@@ -170,3 +170,43 @@ def test_plug_status_route_falls_back_to_live_when_cache_empty(client: TestClien
     assert r.status_code == 200
     # Live build path must have called the underlying client.
     bundle.kasa.state.assert_awaited()
+
+
+def test_stale_cache_does_not_report_ready(monkeypatch):
+    cache = StatusCache()
+    monkeypatch.setattr("kasa_tapo_services.poller.time.monotonic", lambda: 0.0)
+    cache.put("dev", _stub_status("healthy"))
+    monkeypatch.setattr("kasa_tapo_services.poller.time.monotonic", lambda: 31.0)
+    status = cache.get("dev")
+    assert status.equipment_status == "unknown"
+    assert status.allowed_actions == []
+    assert status.message == "Device status is stale"
+
+
+async def test_hung_poll_invalidates_ready_and_recovers():
+    cache = StatusCache()
+    cache.put("dev", _stub_status("healthy"))
+    hung = True
+
+    async def builder():
+        if hung:
+            await asyncio.Event().wait()
+        return _stub_status("recovered")
+
+    poller = DevicePoller("dev", 0.01, builder, cache, timeout_s=0.01)
+    poller.start()
+    try:
+        for _ in range(100):
+            if cache.get("dev").equipment_status == "unknown":
+                break
+            await asyncio.sleep(0.01)
+        assert cache.get("dev").equipment_status == "unknown"
+        hung = False
+        poller.request_refresh()
+        for _ in range(100):
+            if cache.get("dev").message == "recovered":
+                break
+            await asyncio.sleep(0.01)
+        assert cache.get("dev").equipment_status == "ready"
+    finally:
+        await poller.stop()

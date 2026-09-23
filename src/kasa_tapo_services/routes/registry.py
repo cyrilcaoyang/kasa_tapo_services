@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from fastapi import HTTPException, Request
 
@@ -25,6 +26,7 @@ from kasa_tapo_services.config import (
     load_config,
 )
 from kasa_tapo_services.kasa import KasaPlugClient
+from kasa_tapo_services.models import EquipmentStatus
 from kasa_tapo_services.poller import DevicePoller, StatusCache
 from kasa_tapo_services.tapo import Go2RtcClient, OnvifCameraClient, TapoCameraClient
 from kasa_tapo_services.tapo.media import CameraMediaManager, RecordingHandle
@@ -206,6 +208,15 @@ class DeviceRegistry:
                 builder=_build,
                 cache=self._status_cache,
             )
+            self._status_cache.put(device_id, EquipmentStatus(
+                equipment_id=device_id,
+                equipment_name=bundle.config.name,
+                equipment_kind=bundle.config.kind,
+                host=bundle.config.host,
+                equipment_status="unknown",
+                message="Waiting for first device status poll",
+                device_time=datetime.now(timezone.utc),
+            ))
             poller.start()
             self._pollers[device_id] = poller
 
@@ -222,6 +233,15 @@ class DeviceRegistry:
                 builder=_build,
                 cache=self._status_cache,
             )
+            self._status_cache.put(device_id, EquipmentStatus(
+                equipment_id=device_id,
+                equipment_name=bundle.config.name,
+                equipment_kind=bundle.config.kind,
+                host=bundle.config.host,
+                equipment_status="unknown",
+                message="Waiting for first device status poll",
+                device_time=datetime.now(timezone.utc),
+            ))
             poller.start()
             self._pollers[device_id] = poller
 
